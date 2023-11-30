@@ -1,12 +1,17 @@
 import argparse
+import logging
+import os
+import time
+from typing import Dict
+
 from fastapi import FastAPI
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from pydantic import BaseModel
 import torch
-import os
-import logging
+
 
 logger = logging.getLogger("docker_agent")
+
 
 def setup_arg_parser():
     parser = argparse.ArgumentParser(description="Run the API.")
@@ -57,3 +62,16 @@ def generate(item: GenerateData):
     score = torch.exp(transition_scores).mean().item()
 
     return {"generated_text": output_text, "score": score}
+
+
+class ProjectFinetuneData(BaseModel):
+    project_dict: Dict[str, str]
+
+@app.post("/finetune/project")
+def generate(item: ProjectFinetuneData):
+    for file_name, file_code in item.project_dict.items():
+        print(f">>> {file_name}\n\n{file_code}\n\n")
+
+    time.sleep(1)
+
+    return {"result": "success"}
