@@ -15,6 +15,7 @@ RUN pip install -r requirements.txt
 
 # Copy the rest of the code into the container
 COPY app/. .
+COPY src src
 
 ENV MODEL_NAME=deepseek-ai/deepseek-coder-1.3b-base
 

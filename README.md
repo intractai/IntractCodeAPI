@@ -19,6 +19,10 @@ docker run -p 8000:8000 -it --rm --name docker_agent docker_agent
 ```
 This will start the container and bind port 8000 on the host to port 8000 on the container. The container will be removed when it is stopped. By default the container will use the `deepseek-ai/deepseek-coder-1.3b-base` model. To use a different model, set the `MODEL_NAME` environment variable when starting the container. For example, to use the `bert-large-uncased` model, add the `-e MODEL_NAME=bert-large-uncased` flag to the `docker run` command. To use GPU acceleration, add the `--gpus all` flag to the `docker run` command.
 
+## Finetune hyperparameters
+
+To change the finetune hyperparameters, the environment variables must start with `FINETUNE_`. For example, to change the number of epochs to 2, add the `-e FINETUNE_NUM_TRAIN_EPOCHS=2` flag to the `docker run` command. The parameters that can be changed are same as the `transformers.TrainingArguments` class, and model arguments for the model being finetuned. For more information, see the [documentation](https://huggingface.co/docs/transformers/v4.35.2/en/main_classes/trainer#transformers.TrainingArguments).
+
 ## Testing the Docker Container
 
 To test the Docker container, run the following command:
@@ -26,5 +30,11 @@ To test the Docker container, run the following command:
 ```bash
 python client/call_agent.py "<INPUT TEXT>"
 ``` 
+
+To run a sample finetune on project directories, run the following command:
+
+```bash
+python client/finetune_agent.py
+```
 
 To access the API documentation, navigate to `http://localhost:8000/docs` in your browser.

@@ -3,3 +3,7 @@ fastapi
 torch
 pydantic
 uvicorn[standard]
+datasets
+accelerate
+attrdict
+tqdm

@@ -7,6 +7,8 @@ from typing import Dict
 from fastapi import FastAPI
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from pydantic import BaseModel
+from src import finetune
+from huggingface_hub import snapshot_download
 import torch
 
 
@@ -20,22 +22,26 @@ def setup_arg_parser():
     parser.set_defaults(fp16=True)
     return parser.parse_known_args()
 
+
 def main():
     args, _ = setup_arg_parser()
 
-    global app, tokenizer, model
+    global app, tokenizer, model,local_model_dir,device,dtype,use_flash_attention
     app = FastAPI()
 
     model_name = os.getenv("MODEL_NAME", "deepseek-ai/deepseek-coder-1.3b-base")
+    local_model_dir = os.getenv("LOCAL_MODEL_DIR", "./.model")
     logger.info(f"Using model {model_name}")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     dtype = torch.bfloat16 if args.fp16 else torch.float32
     use_flash_attention = device == "cuda" and args.fp16
+    #Download the model
+    snapshot_download(model_name, local_dir=local_model_dir,local_dir_use_symlinks=False,ignore_patterns=['*.msgpack','*.h5'])
 
-    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(local_model_dir)
     model = AutoModelForCausalLM.from_pretrained(
-        model_name, trust_remote_code=True, use_flash_attention_2=use_flash_attention,
+        local_model_dir, use_flash_attention_2=use_flash_attention,
         device_map=device, torch_dtype=dtype)
     model.to(device)
 
@@ -69,9 +75,25 @@ class ProjectFinetuneData(BaseModel):
 
 @app.post("/finetune/project")
 def generate(item: ProjectFinetuneData):
+    global model, tokenizer, local_model_dir, device, dtype, use_flash_attention
     for file_name, file_code in item.project_dict.items():
         print(f">>> {file_name}\n\n{file_code}\n\n")
 
     time.sleep(1)
 
+    #Launch the training job
+    #Fetch all environeent variables that start with "FINETUNE_"
+    env_vars = {k: v for k, v in os.environ.items() if k.startswith("FINETUNE_")}
+    #Remove the prefix from the env vars, and lowercase them, and create a dict
+    env_vars = {k.replace("FINETUNE_", "").lower(): v for k, v in env_vars.items()}
+
+    finetune.train_supervised_projectdir(item.project_dict,
+                                         model_name_or_path=local_model_dir,output_dir=local_model_dir, 
+                                         report_to='none',**env_vars)
+    #Reload the model
+    print("Reloading model")
+    model = AutoModelForCausalLM.from_pretrained(
+        local_model_dir, use_flash_attention_2=use_flash_attention,
+        device_map=device, torch_dtype=dtype)
     return {"result": "success"}
+
