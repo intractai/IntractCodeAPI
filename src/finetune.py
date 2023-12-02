@@ -9,6 +9,7 @@ import transformers
 from transformers import Trainer
 from datasets import load_dataset,Dataset
 from pathlib import Path
+from src import model as model_mdl
 
 IGNORE_INDEX = -100
 EOT_TOKEN = "<|EOT|>"
@@ -49,6 +50,7 @@ def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: st
 
 def _tokenize_fn(strings: Sequence[str], tokenizer: transformers.PreTrainedTokenizer) -> Dict:
     """Tokenize a list of strings."""
+    print(strings)
     tokenized_list = [
         tokenizer(
             text,
@@ -120,30 +122,15 @@ def train_supervised_projectdir(project_data,**kwargs):
     if training_args.local_rank == 0:
         print('='*100)
         print(training_args)
-    
-    tokenizer = transformers.AutoTokenizer.from_pretrained(
-        model_args.model_name_or_path,
-        model_max_length=training_args.model_max_length,
-        padding_side="right",
-        use_fast=True,
-        trust_remote_code=True
-    )
+
+    tokenizer=model_mdl.current_tokenizer
 
     print("PAD Token:", tokenizer.pad_token, tokenizer.pad_token_id)
     print("BOS Token", tokenizer.bos_token, tokenizer.bos_token_id)
     print("EOS Token", tokenizer.eos_token, tokenizer.eos_token_id)
 
-    if training_args.local_rank == 0:
-        print("Load tokenizer from {} over.".format(model_args.model_name_or_path))
-
-    model = transformers.AutoModelForCausalLM.from_pretrained(
-        model_args.model_name_or_path,
-        torch_dtype=torch.bfloat16
-    )
-
-    if training_args.local_rank == 0:
-        print("Load model from {} over.".format(model_args.model_name_or_path))
-
+    #Store reference to the model and tokenizer in the model module
+    model=model_mdl.current_model
 
     project_dict = {}
     for path in Path(__file__).parent.glob("*"):
@@ -182,3 +169,4 @@ def train_supervised_projectdir(project_data,**kwargs):
     trainer.train()
     trainer.save_state()
     safe_save_model_for_hf_trainer(trainer=trainer, output_dir=training_args.output_dir)
+    model_mdl.current_model=trainer.model

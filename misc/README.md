@@ -1,8 +1,3 @@
-Sample command to run supervised training:
-```
-python misc/train_supervised.py --model_name_or_path microsoft/CodeGPT-small-py --output output/ --data_path misc/test_dataset.json --use_cpu true --num_train_epochs 1 --report_to none
-```
-
 Sample command to run supervised training on entire project directories:
 ```
 FINETUNE_USE_CPU=true FINETUNE_NUM_TRAIN_EPOCHS=3 python misc/train_supervised_projectdirs.py microsoft/CodeGPT-small-py
