@@ -55,6 +55,7 @@ class GenerateData(BaseModel):
 
 @app.put("/generate")
 def generate(item: GenerateData):
+    global model, tokenizer, local_model_dir, device, dtype, use_flash_attention
     inputs = tokenizer(item.input_text, return_tensors="pt").to(model.device)
     outputs = model.generate(
         **inputs, max_length=item.max_decode_length, return_dict_in_generate=True, output_scores=True)
