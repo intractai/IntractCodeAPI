@@ -1,18 +1,25 @@
-import copy
-import random
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Sequence
-
-import torch
-import torch.distributed
-import transformers
 from transformers import Trainer
 from datasets import load_dataset,Dataset
 from pathlib import Path
 from src import model as model_mdl
 
+import torch
+import numpy as np
+import torch.distributed
+import transformers
+import copy
+import random
+
+
 IGNORE_INDEX = -100
 EOT_TOKEN = "<|EOT|>"
+FIM_BEGIN_TOKEN = "<｜fim▁begin｜>"
+FIM_HOLE_TOKEN="<｜fim▁hole｜>"
+FIM_END_TOKEN="<｜fim▁end｜>"
+
+
 
 
 def build_projectcode_prompt(data: dict):
@@ -20,14 +27,6 @@ def build_projectcode_prompt(data: dict):
     for file_path, file_code in data.items():
         data_str += f"#{file_path}\n{file_code}\n\n\n"
     return data_str
-
-@dataclass
-class ModelArguments:
-    model_name_or_path: Optional[str] = field(default="deepseek-ai/deepseek-coder-6.7b-instruct")
-
-@dataclass
-class DataArguments:
-    data_path: str = field(default=None, metadata={"help": "Path to the training data."})
 
 
 @dataclass
@@ -38,6 +37,8 @@ class TrainingArguments(transformers.TrainingArguments):
         default=512,
         metadata={"help": "Maximum sequence length. Sequences will be right padded (and possibly truncated)."},
     )
+    num_code_insertions_per_file: int = 10 # Number of code insertion prompts to generate per file
+    span_max: int = 256 # Range of spans to insert code into, span is randomly selected from a poisson distribution with mean 1
 
 def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: str):
     """Collects the state dict and dump to disk."""
@@ -50,7 +51,6 @@ def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: st
 
 def _tokenize_fn(strings: Sequence[str], tokenizer: transformers.PreTrainedTokenizer) -> Dict:
     """Tokenize a list of strings."""
-    print(strings)
     tokenized_list = [
         tokenizer(
             text,
@@ -76,14 +76,18 @@ def _tokenize_fn(strings: Sequence[str], tokenizer: transformers.PreTrainedToken
 
 
 def preprocess(
-    combined_data: Sequence[str],
+    sources: Sequence[str],
+    targets: Sequence[str],
     tokenizer: transformers.PreTrainedTokenizer,
 ) -> Dict:
     """Preprocess the data by tokenizing."""
-    data_tokenized= _tokenize_fn(combined_data, tokenizer)
-    input_ids = data_tokenized["input_ids"]
+    examples = [s + t for s, t in zip(sources, targets)]
+    examples_tokenized, sources_tokenized = [_tokenize_fn(strings, tokenizer) for strings in (examples, sources)]
+    input_ids = examples_tokenized["input_ids"]
 
     labels = copy.deepcopy(input_ids)
+    for label, source_len in zip(labels, sources_tokenized["input_ids_lens"]):
+        label[:source_len] = IGNORE_INDEX
     return dict(input_ids=input_ids, labels=labels)
 
 @dataclass
@@ -107,18 +111,38 @@ class DataCollatorForSupervisedDataset(object):
         )
 
 def train_tokenize_function(examples, tokenizer):
-    combined_data = [
-        build_projectcode_prompt(data)
-        for data in examples['project_data']
-    ]
-    data_dict = preprocess(combined_data, tokenizer)
+    sources=examples['source']
+    targets=examples['target']
+    data_dict = preprocess(sources, targets, tokenizer)
     return data_dict
+
+
+def generate_dataset_from_projectdir(project_data,num_code_insertions,span_max):
+    dataset=[]
+    # First element in the Dataset is next token prediction on the project data
+    project_data_source = build_projectcode_prompt(project_data)
+    dataset.append({'source':"","target":project_data_source})
+    # Rest of the elements are fill in the blank prompts
+    for file_path, file_code in project_data.items():
+        for _ in range(num_code_insertions):
+            file_code_per_line = file_code.split("\n")
+            span_start = random.randint(0, len(file_code_per_line) - 1)
+            span_length = np.clip(np.random.poisson(1), 1,span_max)
+            span_end = min(span_start + span_length, len(file_code_per_line))
+            code_begin = "\n".join(file_code_per_line[:span_start])
+            code_hole= "\n".join(file_code_per_line[span_start:span_end])
+            code_end = "\n".join(file_code_per_line[span_end:])
+            source=f"{FIM_BEGIN_TOKEN}{code_begin}\n{FIM_HOLE_TOKEN}\n{code_end}{FIM_END_TOKEN}"
+            target=code_hole
+            dataset.append({'source':source,"target":target})
+    return Dataset.from_list(dataset)
+            
+            
 
 def train_supervised_projectdir(project_data,**kwargs):
     #ModelArguments, DataArguments, TrainingArguments
-    parser = transformers.HfArgumentParser((ModelArguments,TrainingArguments))
-    model_args, training_args = parser.parse_dict(kwargs)
-    
+    parser = transformers.HfArgumentParser((TrainingArguments))
+    training_args, = parser.parse_dict(kwargs)
     if training_args.local_rank == 0:
         print('='*100)
         print(training_args)
@@ -132,14 +156,8 @@ def train_supervised_projectdir(project_data,**kwargs):
     #Store reference to the model and tokenizer in the model module
     model=model_mdl.current_model
 
-    project_dict = {}
-    for path in Path(__file__).parent.glob("*"):
-        if path.is_file():
-            with open(path, "r") as f:
-                project_dict[path.name] = f.read()
-    
-    dataset=Dataset.from_list([{'project_data':project_data}])
-
+    dataset=generate_dataset_from_projectdir(project_data,training_args.num_code_insertions_per_file,
+                                             training_args.span_max)
         
     train_dataset = dataset.map(
         train_tokenize_function,
@@ -156,7 +174,8 @@ def train_supervised_projectdir(project_data,**kwargs):
     
     if training_args.local_rank == 0:
         print("Training dataset samples:", len(train_dataset))
-        for index in random.sample(range(len(train_dataset)), 1):
+        #for index in random.sample(range(len(train_dataset)), 3):
+        for index in range(3): #Print the first 3 samples
             print(train_dataset[index]['input_ids'])
             print(f"Sample {index} of the training set: {train_dataset[index]['input_ids']}, {train_dataset[index]['labels']}.")
             print(f"Sample {index} of the training set: {tokenizer.decode(list(train_dataset[index]['input_ids']))}.")
