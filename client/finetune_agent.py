@@ -10,14 +10,18 @@ def send_request(port=8000):
     project_dict = {}
     for path in Path(__file__).parent.glob("*"):
         if path.is_file():
-            with open(path, "r") as f:
+            with open(path, "r", encoding="utf-8") as f:
                 project_dict[path.name] = "hello"
 
-    response = requests.post(f"http://localhost:{port}/finetune/project", json={"project_dict": project_dict})
+    response = requests.post(
+        f"http://localhost:{port}/finetune/project",
+        json={"project_dict": project_dict},
+        timeout=5*60,
+    )
 
     output_data = response.json()
     print(f"Response: {output_data}")
-    
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Send a request to the API.')

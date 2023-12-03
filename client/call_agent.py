@@ -1,5 +1,6 @@
-import requests
 import argparse
+import requests
+
 
 def send_request(input_text, port=8000):
     response = requests.put(f"http://localhost:{port}/generate", json={"input_text": input_text})
@@ -8,9 +9,9 @@ def send_request(input_text, port=8000):
     score = output_data["score"]
 
     print("Input text: " + input_text)
-    print(f"Generated text ({score:.4f}):")
+    print(f"Generated text ({score:.3f}):")
     print(output_text)
-    
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Send a request to the API.')

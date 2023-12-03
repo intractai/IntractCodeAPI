@@ -1,6 +1,6 @@
 transformers
 fastapi
-torch
+torch>=2.0
 pydantic
 uvicorn[standard]
 datasets
