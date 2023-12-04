@@ -9,8 +9,6 @@ from src.arg_handling import parse_args
 
 def train(args, finetune_args):
     """Finetune a model with the given arguments."""
-    # env_vars['use_cpu'] = True
-    # env_vars['num_train_epochs'] = 3
     project_dict = {}
     for path in Path(__file__).parent.glob("*"):
         if path.is_file():
@@ -26,5 +24,5 @@ def train(args, finetune_args):
 
 
 if __name__ == "__main__":
-    args, env_args, unknwon_args = parse_args(env_prefixes=["FINETUNE_"])
+    args, env_args, unknown = parse_args(env_prefixes=["FINETUNE_"])
     train(args, env_args['finetune'])
