@@ -142,7 +142,7 @@ def generate_dataset_from_projectdir(project_data, num_code_insertions, span_max
     return Dataset.from_list(dataset)
 
 
-def train_supervised_projectdir(project_data, **kwargs):
+def train_supervised_projectdir(project_data, eval_dataset=None, **kwargs):
     # ModelArguments, DataArguments, TrainingArguments
     parser = transformers.HfArgumentParser((TrainingArguments))
     training_args = parser.parse_dict(kwargs)[0]
@@ -192,7 +192,7 @@ def train_supervised_projectdir(project_data, **kwargs):
 
     data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer)
     data_module = dict(train_dataset=train_dataset,
-                       eval_dataset=None, data_collator=data_collator)
+                       eval_dataset=eval_dataset, data_collator=data_collator)
 
     trainer = Trainer(model=model, tokenizer=tokenizer,
                       args=training_args, **data_module)
