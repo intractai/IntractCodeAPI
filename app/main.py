@@ -31,10 +31,12 @@ def main():
     app = FastAPI()
 
     model_name = os.getenv(
+        # "MODEL_NAME", "deepseek-ai/deepseek-coder-6.7b-base")
         "MODEL_NAME", "deepseek-ai/deepseek-coder-1.3b-base")
     local_model_dir = os.getenv("LOCAL_MODEL_DIR", "./.model")
     logger.info("Using model %s", model_name)
-    modeling.intialize_model(model_name, local_model_dir, args)
+    # modeling.intialize_model(model_name, local_model_dir, args)
+    modeling.initialize_lora_model(model_name, local_model_dir, args)
 
     model = modeling.GLOBAL_MODEL
     tokenizer = modeling.GLOBAL_TOKENIZER
@@ -92,8 +94,9 @@ def finetune_project(item: ProjectFinetuneData):
     for file_name, file_code in item.project_dict.items():
         print(f">>> {file_name}\n\n{file_code}\n\n")
 
-    # item.project_dict = {k: v for k, v in item.project_dict.items()
-    #                 if k in ['ninjax/examples/quickstart.py']} #, 'ninjax/examples/libraries.py', 'ninjax/ninjax/ninjax.py']}
+    item.project_dict = {k: v for k, v in item.project_dict.items()
+                    if not k.startswith('ninjax') \
+                        or k in ['ninjax/examples/quickstart.py', 'ninjax/examples/libraries.py', 'ninjax/ninjax/ninjax.py']}
 
     try: 
         with ThreadPoolExecutor() as executor:

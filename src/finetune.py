@@ -266,6 +266,8 @@ def train_supervised_projectdir(project_data, eval_data=None, **kwargs):
     parser = transformers.HfArgumentParser((TrainingArguments))
     training_args = parser.parse_dict(kwargs)[0]
     training_args.do_train = True
+    # TODO: this is required for training LORA and QLORA; it should be removed in the case that it harms performance
+    training_args.remove_unused_columns = False 
 
     if training_args.local_rank == 0:
         print('=' * 100)
@@ -315,6 +317,7 @@ def train_supervised_projectdir(project_data, eval_data=None, **kwargs):
                       args=training_args, **data_module)
 
     trainer.train()
+    modeling.GLOBAL_MODEL = trainer.model
     
     # Release all the memory used by the trainer
     trainer.model = None
@@ -327,4 +330,3 @@ def train_supervised_projectdir(project_data, eval_data=None, **kwargs):
 
     # trainer.save_state()
 
-    # modeling.GLOBAL_MODEL = trainer.model

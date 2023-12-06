@@ -6,12 +6,26 @@ from typing import Optional, Dict, Sequence
 import torch
 import torch.distributed
 import transformers
-from transformers import Trainer
+from transformers import Trainer, BitsAndBytesConfig
 from datasets import load_dataset
-
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 
 IGNORE_INDEX = -100
 EOT_TOKEN = "<|EOT|>"
+
+def print_trainable_parameters(model):
+    """
+    Prints the number of trainable parameters in the model.
+    """
+    trainable_params = 0
+    all_param = 0
+    for _, param in model.named_parameters():
+        all_param += param.numel()
+        if param.requires_grad:
+            trainable_params += param.numel()
+    print(
+        f"trainable params: {trainable_params} || all params: {all_param} || trainable%: {100 * trainable_params / all_param:.2f}"
+    )
 
 def build_instruction_prompt(instruction: str):
     return '''
@@ -38,6 +52,7 @@ class TrainingArguments(transformers.TrainingArguments):
         default=512,
         metadata={"help": "Maximum sequence length. Sequences will be right padded (and possibly truncated)."},
     )
+    remove_unused_columns: bool = False
 
 def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: str):
     """Collects the state dict and dump to disk."""
