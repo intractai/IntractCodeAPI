@@ -4,9 +4,7 @@ import logging
 import os
 import sys
 from typing import Dict
-import time
 import threading
-import asyncio
 
 from fastapi import FastAPI
 from pydantic import BaseModel
@@ -52,8 +50,6 @@ class GenerateData(BaseModel):
 
 @app.put("/generate")
 def generate(item: GenerateData):
-    global current_future
-
     # Cancel the current future if it exists
     try: 
         with ThreadPoolExecutor() as executor:
