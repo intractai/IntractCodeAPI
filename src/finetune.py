@@ -261,6 +261,8 @@ def train_supervised_projectdir(project_data, eval_data=None, **kwargs):
     # Eval data must be in format {name_of_dataset: {file_name: file_contents, ...}},
     # even if only one eval dataset
     # ModelArguments, DataArguments, TrainingArguments
+    # torch.set_num_threads(1)
+
     parser = transformers.HfArgumentParser((TrainingArguments))
     training_args = parser.parse_dict(kwargs)[0]
     training_args.do_train = True
@@ -313,6 +315,16 @@ def train_supervised_projectdir(project_data, eval_data=None, **kwargs):
                       args=training_args, **data_module)
 
     trainer.train()
-    trainer.save_state()
     
-    modeling.GLOBAL_MODEL = trainer.model
+    # Release all the memory used by the trainer
+    trainer.model = None
+    trainer.tokenizer = None
+    trainer.optimizer = None
+    trainer.lr_scheduler = None
+    trainer.state = None
+    trainer.args = None
+    torch.cuda.empty_cache()
+
+    # trainer.save_state()
+
+    # modeling.GLOBAL_MODEL = trainer.model

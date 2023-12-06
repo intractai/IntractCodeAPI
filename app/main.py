@@ -23,9 +23,10 @@ logger = logging.getLogger("docker_agent")
 
 
 def main():
-    global app, env_args, tokenizer, model, local_model_dir, device, dtype, use_flash_attention
+    global app, args, env_args, tokenizer, model, local_model_dir, device, dtype, use_flash_attention
 
     args, env_args, _ = parse_args(env_prefixes=["FINETUNE_"])
+    args.context_length = 512
 
     app = FastAPI()
 
@@ -58,6 +59,7 @@ def generate(item: GenerateData):
             # Run the future and return the result
             result = job_thread.result()
     except CancelledError:
+        print("Canceled generation!")
         logger.info("Cancelled /generate execution by a new request.") 
         result = {"error": "Cancelled by new request"}
     return result
@@ -68,7 +70,7 @@ def generate_task(item: GenerateData):
     modeling.GLOBAL_GENERATE_THREAD_ID = threading.get_ident()
     inputs = tokenizer(item.input_text, return_tensors="pt").to(model.device)
     outputs = model.generate(
-        **inputs, max_length=item.max_decode_length,
+        **inputs, max_length=args.context_length,
         return_dict_in_generate=True, output_scores=True)
     out_tokens = outputs.sequences[0][inputs.input_ids.shape[1]:]
     output_text = tokenizer.decode(out_tokens, skip_special_tokens=True)
@@ -90,6 +92,9 @@ def finetune_project(item: ProjectFinetuneData):
     for file_name, file_code in item.project_dict.items():
         print(f">>> {file_name}\n\n{file_code}\n\n")
 
+    # item.project_dict = {k: v for k, v in item.project_dict.items()
+    #                 if k in ['ninjax/examples/quickstart.py']} #, 'ninjax/examples/libraries.py', 'ninjax/ninjax/ninjax.py']}
+
     try: 
         with ThreadPoolExecutor() as executor:
             # Create a new future for the incoming request
@@ -97,10 +102,17 @@ def finetune_project(item: ProjectFinetuneData):
             # Run the future and return the result
             result = job_thread.result()
     except CancelledError:
+        print("Canceled!")
         logger.info("Cancelled /generate execution by a new request.") 
-        result = {"error": "Cancelled by new request"}
+    return {"result": "Cancelled by new request"}    
 
-    return result
+    # finetune_args = env_args['finetune']
+    # finetune.train_supervised_projectdir(
+    #     item.project_dict, output_dir=local_model_dir,
+    #     report_to='none', **vars(finetune_args))
+
+    # return {"result": "success"}
+
 
 def finetune_task(item: ProjectFinetuneData):
     #Print the current thread id to show that it is different for each request
