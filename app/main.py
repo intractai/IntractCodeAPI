@@ -4,6 +4,7 @@ import logging
 import os
 import sys
 from typing import Dict
+import threading
 
 from fastapi import FastAPI
 from pydantic import BaseModel
@@ -13,6 +14,9 @@ sys.path.append('../')
 from src import modeling
 from src.arg_handling import parse_args
 from src import finetune
+from concurrent.futures import ThreadPoolExecutor, CancelledError
+
+
 
 
 logger = logging.getLogger("docker_agent")
@@ -43,8 +47,26 @@ class GenerateData(BaseModel):
     max_decode_length: int = 128
 
 
+
 @app.put("/generate")
 def generate(item: GenerateData):
+    # Cancel the current future if it exists
+    try: 
+        with ThreadPoolExecutor() as executor:
+            # Create a new future for the incoming request
+            job_thread = executor.submit(generate_task, item)
+            # Run the future and return the result
+            result = job_thread.result()
+    except CancelledError:
+        logger.info("Cancelled /generate execution by a new request.") 
+        result = {"error": "Cancelled by new request"}
+    return result
+
+    
+
+def generate_task(item: GenerateData):
+    #Print the current thread id to show that it is different for each request
+    modeling.GLOBAL_GENERATE_THREAD_ID = threading.get_ident()
     inputs = tokenizer(item.input_text, return_tensors="pt").to(model.device)
     outputs = model.generate(
         **inputs, max_length=item.max_decode_length,
@@ -57,7 +79,6 @@ def generate(item: GenerateData):
         outputs.sequences, outputs.scores, normalize_logits=True,
     )
     score = torch.exp(transition_scores).mean().item()
-
     return {"generated_text": output_text, "score": score}
 
 
@@ -66,7 +87,7 @@ class ProjectFinetuneData(BaseModel):
 
 
 @app.post("/finetune/project")
-def generate(item: ProjectFinetuneData):
+def finetune_project(item: ProjectFinetuneData):
     for file_name, file_code in item.project_dict.items():
         print(f">>> {file_name}\n\n{file_code}\n\n")
 

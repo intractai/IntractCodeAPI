@@ -5,6 +5,9 @@ import requests
 def send_request(input_text, port=8000):
     response = requests.put(f"http://localhost:{port}/generate", json={"input_text": input_text})
     output_data = response.json()
+    if "error" in output_data:
+        print(f"Error: {output_data['error']}")
+        return
     output_text = output_data["generated_text"]
     score = output_data["score"]
 

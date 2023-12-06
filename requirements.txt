@@ -7,3 +7,5 @@ datasets
 accelerate
 attrdict
 tqdm
+bitsandbytes
+peft

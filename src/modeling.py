@@ -1,10 +1,10 @@
 import os
+from pathlib import Path
 
 import torch
 import bitsandbytes as bnb
 from huggingface_hub import snapshot_download
 from transformers import AutoTokenizer, AutoModelForCausalLM
-from pathlib import Path
 from transformers import Trainer, BitsAndBytesConfig
 from datasets import load_dataset
 from peft import (
@@ -12,10 +12,13 @@ from peft import (
     LoraConfig,
     get_peft_model
 )
+import threading
+from concurrent.futures import  CancelledError
 
 # Create a global variable to store the model
 GLOBAL_MODEL = None
 GLOBAL_TOKENIZER = None
+GLOBAL_GENERATE_THREAD_ID = None
 
 def _find_all_linear_names(args, model):
     cls = bnb.nn.Linear4bit if args.bits == 4 else (bnb.nn.Linear8bitLt if args.bits == 8 else torch.nn.Linear)
@@ -30,6 +33,11 @@ def _find_all_linear_names(args, model):
         lora_module_names.remove('lm_head')
     return list(lora_module_names)
 
+
+def thread_hook(*args):
+    current_thread_id = threading.get_ident()
+    if GLOBAL_GENERATE_THREAD_ID is not None and current_thread_id != GLOBAL_GENERATE_THREAD_ID:
+        raise CancelledError("Cancelled by new request")
 
 def intialize_model(model_name, local_dir, args):
     """Download a model from the HuggingFace Hub and save it to the local directory."""
@@ -52,7 +60,8 @@ def intialize_model(model_name, local_dir, args):
         local_dir, use_flash_attention_2=use_flash_attention,
         device_map=device, torch_dtype=dtype)
     model.to(device)
-
+    for _, md in model.named_modules():
+        md.register_forward_hook(thread_hook)
     GLOBAL_MODEL = model
     GLOBAL_TOKENIZER = tokenizer
 
