@@ -62,7 +62,6 @@ def generate(item: GenerateData):
         result = {"error": "Cancelled by new request"}
     return result
 
-    
 
 def generate_task(item: GenerateData):
     #Print the current thread id to show that it is different for each request
@@ -91,9 +90,25 @@ def finetune_project(item: ProjectFinetuneData):
     for file_name, file_code in item.project_dict.items():
         print(f">>> {file_name}\n\n{file_code}\n\n")
 
+    try: 
+        with ThreadPoolExecutor() as executor:
+            # Create a new future for the incoming request
+            job_thread = executor.submit(finetune_task, item)
+            # Run the future and return the result
+            result = job_thread.result()
+    except CancelledError:
+        logger.info("Cancelled /generate execution by a new request.") 
+        result = {"error": "Cancelled by new request"}
+
+    return result
+
+def finetune_task(item: ProjectFinetuneData):
+    #Print the current thread id to show that it is different for each request
+    modeling.GLOBAL_GENERATE_THREAD_ID = threading.get_ident()
+
     finetune_args = env_args['finetune']
     finetune.train_supervised_projectdir(
         item.project_dict, output_dir=local_model_dir,
         report_to='none', **vars(finetune_args))
-    
+
     return {"result": "success"}
