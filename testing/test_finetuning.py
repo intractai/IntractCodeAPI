@@ -1,11 +1,15 @@
 """Test finetuning a model with the given arguments."""
 
+import argparse
 from argparse import Namespace
 import os
 from pathlib import Path
 import random
 import sys
-from typing import Dict
+from typing import Dict, Optional
+
+import numpy as np
+import torch
 
 sys.path.append('./')
 from src import finetune, modeling
@@ -17,8 +21,28 @@ FINETUNE_DATA_DIR = 'data/finetune/'
 OOD_DATA_DIR = 'data/ood/'
 
 
-# def parse_testing_args():
-#     # n finetun
+def parse_testing_args(raw_args: list[str]):
+    """Parse arguments for testing finetuning."""
+
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('--holdout_frac', type=float, default=0.2,
+                        help='Fraction of finetuning data per project ' + \
+                             'to hold out for testing.')
+    parser.add_argument('--total_epochs', type=int, default=2,
+                        help='Total number of epochs over all data.')
+    parser.add_argument('--epochs_per_project', type=int, default=1,
+                        help='Number of epochs to train on each project.')
+    parser.add_argument('--n_ood_projects', type=int, default=10,
+                        help='Number of projects to use in OOD dataset.')
+    parser.add_argument('--n_finetune_projects', type=int, default=10,
+                        help='Number of projects to finetune on')
+    parser.add_argument('--seed', type=int, default=8)
+    parser.add_argument('--wandb', action='store_true', default=False,
+                        help='Whether to log to wandb.')
+
+    parsed_args = parser.parse_args(raw_args)
+    return parsed_args
 
 
 def train(
@@ -59,11 +83,12 @@ def train(
 #   - Percent FIM
 #   - Whether to prefix prompts with file path & line number
 
-def load_projects(relative_path: str) -> Dict[str, Dict[str, str]]:
+def load_projects(relative_path: str, n: Optional[int] = None) -> Dict[str, Dict[str, str]]:
     """Load project data from a directory.
 
     Args:
         relative_path: Path to directory containing projects.
+        n: Number of projects to load. If None, load all projects.
 
     Returns:
         Dictionary mapping project names to dictionaries mapping file names to file contents.
@@ -73,7 +98,7 @@ def load_projects(relative_path: str) -> Dict[str, Dict[str, str]]:
     all_project_data = {}
     data_dir = Path(__file__).parent / relative_path
     # Loop through each project in this directory
-    for project_path in data_dir.glob('*'):
+    for i, project_path in enumerate(data_dir.glob('*')):
         if project_path.is_dir():
             project_data = {}
             # Loop through each file in this project
@@ -81,12 +106,66 @@ def load_projects(relative_path: str) -> Dict[str, Dict[str, str]]:
                 if file_path.is_file():
                     try:
                         with open(file_path, 'r', encoding='utf-8') as f:
-                            project_data[file_path.name] = f.read()
+                            file_text = f.read()
+                        if len(file_text) > 0:
+                            project_data[file_path.name] = file_text
                     except UnicodeDecodeError:
                         print(f'Error reading file {file_path}. Skipping...')
             all_project_data[project_path.name] = project_data
 
+        if n is not None and i >= n:
+            break
+
     return all_project_data
+
+
+def split_project_data(project_data: Dict[str, str], holdout_frac: float):
+    """Split project data into training and testing sets.
+
+    Args:
+        project_data: Dictionary mapping file names to file contents.
+        holdout_frac: Fraction of finetuning data per project to hold out for testing.
+
+    Returns:
+        Tuple of dictionaries mapping project names to dictionaries mapping file names
+        to file contents. The first dictionary contains the training data, and the
+        second contains the testing data.
+    """
+
+    # Determine which files to hold out
+    all_files = list(project_data.keys())
+    num_holdout_files = int(len(all_files) * holdout_frac)
+    holdout_files = set(np.random.choice(all_files, num_holdout_files, replace=False))
+
+    # Split data into training and testing sets
+    train_data = {}
+    test_data = {}
+    for file_name, file_data in project_data.items():
+        if file_name in holdout_files:
+            test_data[file_name] = file_data
+        else:
+            train_data[file_name] = file_data
+
+    return train_data, test_data
+
+
+def combine_project_data(multi_project_data: Dict[str, Dict[str, str]]) -> Dict[str, str]:
+    """Combine data from multiple projects into a single dictionary.
+
+    Args:
+        multi_project_data: Dictionary mapping project names to dictionaries mapping
+            file names to file contents.
+
+    Returns:
+        Dictionary mapping file names to file contents.
+    """
+
+    all_data = {}
+    for project_name, project_data in multi_project_data.items():
+        for file_name, file_data in project_data.items():
+            all_data[f'{project_name}/{file_name}'] = file_data
+
+    return all_data
 
 
 def run_eval(
@@ -96,28 +175,80 @@ def run_eval(
 
     # Load data
     print('Loading project data...')
-    finetune_data = load_projects(FINETUNE_DATA_DIR)
-    ood_data = load_projects(OOD_DATA_DIR)
+    primary_data = load_projects(FINETUNE_DATA_DIR, args.n_finetune_projects)
+    ood_data = load_projects(OOD_DATA_DIR, args.n_ood_projects)
+
+    # Flatten the ood_data
+    all_ood_data = combine_project_data(ood_data)
+
+    # # Split primary data into training and testing sets
+    # primary_train_data = {}
+    # primary_test_data = {}
+    # for project_name, project_data in primary_data.items():
+    #     train_data, test_data = split_project_data(project_data, args.holdout_frac)
+    #     primary_train_data[project_name] = train_data
+    #     primary_test_data[project_name] = test_data
 
     # Determine project training order for `finetune_data`
-    finetune_order = list(finetune_data.keys())
-    random.shuffle(finetune_order)
+    finetune_order = list(primary_data.keys())
+    np.random.shuffle(finetune_order)
 
     # Train for an epoch on each primary project while periodically logging metrics
     print('Starting training...')
-    for project_name in finetune_order:
-        current_project_data = finetune_data[project_name]
-        print(f'Training on project {project_name}...')
-        finetune.train_supervised_projectdir(
-            project_data=current_project_data,
-            eval_dataset=ood_data[list(ood_data.keys())[0]],
-            output_dir=args.local_model_dir,
-            report_to='none',
-            **vars(finetune_args)
-        )
+    for outer_epoch in range(args.total_epochs):
+        for project_idx, project_name in enumerate(finetune_order):
+
+            # Get the data for the current project we are finetuning on
+            current_project_data = primary_data[project_name]
+
+            # Get the data for all projects we have seen previously
+            if outer_epoch == 0:
+                seen_project_data = {
+                    project_name: primary_data[project_name]
+                    for project_name in finetune_order[:project_idx]
+                }
+                seen_project_data = combine_project_data(seen_project_data)
+            else:
+                seen_project_data = combine_project_data(primary_data)
+
+            # Gather the eval datasets
+            eval_datasets = {'ood': all_ood_data}
+            if len(seen_project_data) > 0:
+                eval_datasets['previous_projects'] = seen_project_data
+
+            # print('ood', len(all_ood_data), [len(v) for k, v in all_ood_data.items()])
+            # print('=' * 100)
+            # print('primary', len(current_project_data), [len(v) for k, v in current_project_data.items()])
+            # print('=' * 100)
+            # print('previous_projects', len(seen_project_data), [len(v) for k, v in seen_project_data.items()])
+            # exit()
+
+            # Finetune on the current project
+            print(f'Training on project {project_name}...')
+            finetune.train_supervised_projectdir(
+                project_data=current_project_data,
+                eval_data=eval_datasets,
+                output_dir=args.local_model_dir,
+                num_train_epochs=args.epochs_per_project,
+                report_to='wandb' if args.wandb else 'none',
+                do_eval=True,
+                evaluation_strategy='epoch',
+                **vars(finetune_args)
+            )
 
 
 if __name__ == '__main__':
-    args, env_args, unknown_args = parse_args(env_prefixes=['FINETUNE_'])
+    generic_args, env_args, unknown_args = parse_args(env_prefixes=['FINETUNE_'])
+    testing_args = parse_testing_args(unknown_args)
+    args = Namespace(**{**vars(generic_args), **vars(testing_args)})
+
+    # Set random seed
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+
+    # Load model
     modeling.intialize_model(args.model_dir, args.local_model_dir, args)
+
+    # Finetune and evaluate
     run_eval(args, env_args['finetune'])

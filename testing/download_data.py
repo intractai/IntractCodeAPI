@@ -24,6 +24,15 @@ GH_DOWNLOAD_URL = 'https://api.github.com/repos'
 PRIMARY_DATA_DIR = 'data/finetune/'
 OOD_DATA_DIR = 'data/ood/'
 
+UNALLOWED_FILE_TYPES = set([
+    '.jpg', '.jpeg', '.png', '.lib', '.dll', '.bin', '.exe', '.so', '.a',
+    '.o', '.out', '.obj', '.pyc', '.class', '.jar', '.war', '.ear', '.zip',
+    '.tar', '.gz', '.tgz', '.rar', '.7z', '.pdf', '.doc', '.docx', '.ppt',
+    '.pptx', '.webp', '.stl', '.vcxproj', '.sln', '.vcxproj.filters',
+    '.svg', '.ico', '.icns', '.ttf', '.woff', '.woff2', '.eot', '.mp3',
+    '.mp4', '.wav', '.mov', '.avi', '.mpg', '.mpeg', '.flv', '.wmv',
+])
+
 
 def parse_args():
     """Parses command line arguments."""
@@ -44,8 +53,12 @@ def parse_args():
     two_months_ago = datetime.datetime.now() - datetime.timedelta(days=60)
     parser.add_argument('--min_date', type=str, default=two_months_ago.strftime('%Y-%m-%d'),
                         help='Minimum date for repositories to pull from.')
-    parser.add_argument('--max_size', type=int, default=5000,
+    parser.add_argument('--max_repo_size', type=int, default=1000,
                         help='Maximum size of repository in kilobytes.')
+    parser.add_argument('--min_true_size', type=int, default=10,
+                        help='Minimum size of repository in kilobytes post processing.')
+    parser.add_argument('--min_true_files', type=int, default=5,
+                        help='Minimum number of files after post processing.')
     parser.add_argument('--max_file_size', type=int, default=30,
                         help='Maximum file size of repository in kilobytes.')
     parser.add_argument('--clean', action='store_true', default=False,
@@ -137,8 +150,9 @@ def find_gh_repos(
 
 
 def download_and_save_repo(
-        repo_url: str, output_dir: str, auth_token: str,
-        timeout: int = 30, max_file_size_kb: int = 30):
+        repo_url: str, output_dir: str, auth_token: str, timeout: int = 30,
+        max_file_size_kb: int = 30, repo_name: Optional[str] = None,
+        min_true_size: Optional[int] = None, min_true_files: Optional[int] = None):
     """Downloads a repository from GitHub and saves it to the specified directory.
 
     Args:
@@ -147,6 +161,9 @@ def download_and_save_repo(
         auth_token: GitHub personal access token.
         timeout: Timeout in seconds.
         max_file_size_kb: Maximum file size in kilobytes.
+        repo_name: Name of the repository. If not specified, will be inferred from `repo_url`.
+        min_true_size: Minimum size of repository in kilobytes post processing.
+        min_true_files: Minimum number of files after post processing.
     """
     headers = {'Authorization': f'token {auth_token}'}
     response = requests.get(
@@ -155,16 +172,36 @@ def download_and_save_repo(
 
     z = zipfile.ZipFile(io.BytesIO(response.content))
 
-    # Delete any files that are too large
-    # TODO: This could lead to an empty repository, maybe fix this eventually
+    # Delete any files that are too large or not allowed
     for file in z.filelist:
         if file.file_size > max_file_size_kb * 1024:
             z.filelist.remove(file)
+        elif os.path.splitext(file.filename)[1].lower() in UNALLOWED_FILE_TYPES:
+            z.filelist.remove(file)
 
-    z.extractall(path=output_dir)
+    # Save to output directory under project name
+    repo_name = repo_name or os.path.splitext(os.path.basename(repo_url))[0]
+
+    # Check for min number of files and min size
+    too_few_files = min_true_files and len(z.filelist) < min_true_files
+    too_small_size = min_true_size and \
+        sum([file.file_size for file in z.filelist]) < min_true_size * 1024
+
+    if too_few_files or too_small_size:
+        print(f'Skipping {repo_name} due to too few files or too small size.')
+        return
+
+    # Save to output directory under project name
+    z.extractall(output_dir)
+
+    # Rename root folder to project name
+    root_folder = z.filelist[0].filename.split('/')[0]
+    os.rename(
+        os.path.join(output_dir, root_folder),
+        os.path.join(output_dir, repo_name))
 
 
-def save_repos(repos_data: List[Dict[str, Any]], output_dir: str, auth_token: str):
+def save_repos(repos_data: List[Dict[str, Any]], output_dir: str, auth_token: str, **kwargs):
     """Saves a list of repositories to a specified directory.
 
     Args:
@@ -176,7 +213,8 @@ def save_repos(repos_data: List[Dict[str, Any]], output_dir: str, auth_token: st
         owner = repo['owner']
         repo_name = repo['name']
         repo_url = f'{GH_DOWNLOAD_URL}/{owner}/{repo_name}/zipball'
-        download_and_save_repo(repo_url, output_dir, auth_token)
+        download_and_save_repo(
+            repo_url, output_dir, auth_token, repo_name=repo_name, **kwargs)
 
 
 if __name__ == '__main__':
@@ -184,8 +222,10 @@ if __name__ == '__main__':
 
     # Clean the data directory
     if args.clean:
-        shutil.rmtree(PRIMARY_DATA_DIR)
-        shutil.rmtree(OOD_DATA_DIR)
+        if os.path.isdir(PRIMARY_DATA_DIR):
+            shutil.rmtree(PRIMARY_DATA_DIR)
+        if os.path.isdir(OOD_DATA_DIR):
+            shutil.rmtree(OOD_DATA_DIR)
 
     # Create data directories if they don't exist
     os.makedirs(PRIMARY_DATA_DIR, exist_ok=True)
@@ -202,7 +242,7 @@ if __name__ == '__main__':
     primary_data = find_gh_repos(
         auth_token=pat,
         n_repos=args.n_repos,
-        max_size_kb=args.max_size,
+        max_size_kb=args.max_repo_size,
         min_stars=args.min_stars,
         min_date=args.min_date,
         languages=[args.main_lang]
@@ -211,12 +251,16 @@ if __name__ == '__main__':
     ood_data = find_gh_repos(
         auth_token=pat,
         n_repos=args.n_repos,
-        max_size_kb=args.max_size,
+        max_size_kb=args.max_repo_size,
         min_stars=args.min_stars,
         min_date=args.min_date,
         languages=args.ood_langs
     )
 
     # Save the repositories
-    save_repos(primary_data, PRIMARY_DATA_DIR, pat)
-    save_repos(ood_data, OOD_DATA_DIR, pat)
+    save_repos(
+        primary_data, PRIMARY_DATA_DIR, pat, max_file_size_kb=args.max_file_size,
+        min_true_size=args.min_true_size, min_true_files=args.min_true_files)
+    save_repos(
+        ood_data, OOD_DATA_DIR, pat, max_file_size_kb=args.max_file_size,
+        min_true_size=args.min_true_size, min_true_files=args.min_true_files)
