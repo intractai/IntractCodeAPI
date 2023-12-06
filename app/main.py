@@ -26,7 +26,8 @@ def main():
     global app, args, env_args, tokenizer, model, local_model_dir, device, dtype, use_flash_attention
 
     args, env_args, _ = parse_args(env_prefixes=["FINETUNE_"])
-    args.context_length = 512
+    args.context_length = 768
+    args.fp16 = True
 
     app = FastAPI()
 
@@ -36,7 +37,7 @@ def main():
     local_model_dir = os.getenv("LOCAL_MODEL_DIR", "./.model")
     logger.info("Using model %s", model_name)
     # modeling.intialize_model(model_name, local_model_dir, args)
-    modeling.initialize_lora_model(model_name, local_model_dir, args)
+    modeling.initialize_model(model_name, local_model_dir, args)
 
     model = modeling.GLOBAL_MODEL
     tokenizer = modeling.GLOBAL_TOKENIZER
@@ -72,8 +73,9 @@ def generate_task(item: GenerateData):
     modeling.GLOBAL_GENERATE_THREAD_ID = threading.get_ident()
     inputs = tokenizer(item.input_text, return_tensors="pt").to(model.device)
     outputs = model.generate(
-        **inputs, max_length=args.context_length,
-        return_dict_in_generate=True, output_scores=True)
+        **inputs, max_length=args.context_length, max_new_tokens=128,
+        return_dict_in_generate=True, output_scores=True,
+        do_sample=True, temperature=1.0, top_k=10, top_p=0.5)
     out_tokens = outputs.sequences[0][inputs.input_ids.shape[1]:]
     output_text = tokenizer.decode(out_tokens, skip_special_tokens=True)
 
@@ -94,9 +96,9 @@ def finetune_project(item: ProjectFinetuneData):
     for file_name, file_code in item.project_dict.items():
         print(f">>> {file_name}\n\n{file_code}\n\n")
 
-    item.project_dict = {k: v for k, v in item.project_dict.items()
-                    if not k.startswith('ninjax') \
-                        or k in ['ninjax/examples/quickstart.py', 'ninjax/examples/libraries.py', 'ninjax/ninjax/ninjax.py']}
+    # item.project_dict = {k: v for k, v in item.project_dict.items()
+    #                 if not k.startswith('ninjax') \
+    #                     or k in ['ninjax/examples/quickstart.py', 'ninjax/examples/libraries.py', 'ninjax/ninjax/ninjax.py']}
 
     try: 
         with ThreadPoolExecutor() as executor:

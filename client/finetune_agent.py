@@ -8,7 +8,7 @@ def send_request(port=8000):
     # Make a dictionary of the relative paths to all files
     # in the same directory as this script, and map to the file contents.
     project_dict = {}
-    for path in Path(__file__).parent.glob("*"):
+    for path in Path(__file__).parent.parent.glob("misc/test_files/*.py"):
         if path.is_file():
             with open(path, "r", encoding="utf-8") as f:
                 project_dict[path.name] = "hello"
@@ -16,7 +16,7 @@ def send_request(port=8000):
     response = requests.post(
         f"http://localhost:{port}/finetune/project",
         json={"project_dict": project_dict},
-        timeout=5*60,
+        timeout=10*60,
     )
 
     output_data = response.json()

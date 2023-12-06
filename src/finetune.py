@@ -318,7 +318,7 @@ def train_supervised_projectdir(project_data, eval_data=None, **kwargs):
 
     trainer.train()
     modeling.GLOBAL_MODEL = trainer.model
-    
+
     # Release all the memory used by the trainer
     trainer.model = None
     trainer.tokenizer = None
@@ -329,4 +329,3 @@ def train_supervised_projectdir(project_data, eval_data=None, **kwargs):
     torch.cuda.empty_cache()
 
     # trainer.save_state()
-
