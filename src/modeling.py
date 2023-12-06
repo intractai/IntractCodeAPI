@@ -2,12 +2,19 @@ import os
 
 from huggingface_hub import snapshot_download
 import torch
+import threading
 from transformers import AutoTokenizer, AutoModelForCausalLM
-
+from concurrent.futures import  CancelledError
 # Create a global variable to store the model
 GLOBAL_MODEL = None
 GLOBAL_TOKENIZER = None
+GLOBAL_GENERATE_THREAD_ID = None
 
+
+def thread_hook(*args):
+    current_thread_id = threading.get_ident()
+    if GLOBAL_GENERATE_THREAD_ID is not None and current_thread_id != GLOBAL_GENERATE_THREAD_ID:
+        raise CancelledError("Cancelled by new request")
 
 def intialize_model(model_name, local_dir, args):
     """Download a model from the HuggingFace Hub and save it to the local directory."""
@@ -30,6 +37,7 @@ def intialize_model(model_name, local_dir, args):
         local_dir, use_flash_attention_2=use_flash_attention,
         device_map=device, torch_dtype=dtype)
     model.to(device)
-
+    for _, md in model.named_modules():
+        md.register_forward_hook(thread_hook)
     GLOBAL_MODEL = model
     GLOBAL_TOKENIZER = tokenizer
