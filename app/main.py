@@ -26,8 +26,8 @@ def main():
     global app, args, env_args, tokenizer, model, local_model_dir, device, dtype, use_flash_attention
 
     args, env_args, _ = parse_args(env_prefixes=["FINETUNE_"])
-    args.context_length = 768
-    args.fp16 = True
+    # args.context_length = 768
+    # args.fp16 = True
 
     app = FastAPI()
 
@@ -73,7 +73,7 @@ def generate_task(item: GenerateData):
     modeling.GLOBAL_GENERATE_THREAD_ID = threading.get_ident()
     inputs = tokenizer(item.input_text, return_tensors="pt").to(model.device)
     outputs = model.generate(
-        **inputs, max_length=args.context_length, max_new_tokens=128,
+        **inputs, max_new_tokens=128, # max_length=args.context_length,
         return_dict_in_generate=True, output_scores=True,
         do_sample=True, temperature=1.0, top_k=10, top_p=0.5)
     out_tokens = outputs.sequences[0][inputs.input_ids.shape[1]:]
