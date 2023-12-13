@@ -5,16 +5,17 @@ from argparse import Namespace
 from pathlib import Path
 import random
 import sys
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 import numpy as np
 import torch
 from torch.nn import functional as F
+from transformers.trainer_utils import EvalPrediction
 
 sys.path.append('./')
 from src import finetune, modeling
-from src.finetune import IGNORE_INDEX
 from src.arg_handling import parse_args
+from src.finetune import IGNORE_INDEX
 
 
 # Relative to this file
@@ -109,7 +110,9 @@ def load_projects(relative_path: str, n: Optional[int] = None) -> Dict[str, Dict
                         with open(file_path, 'r', encoding='utf-8') as f:
                             file_text = f.read()
                         if len(file_text) > 0:
-                            project_data[file_path.name] = file_text
+                            # Path to file starting from the name of the project folder
+                            rel_path = file_path.relative_to(project_path.parent)
+                            project_data[str(rel_path)] = file_text
                     except UnicodeDecodeError:
                         print(f'Error reading file {file_path}. Skipping...')
             all_project_data[project_path.name] = project_data
@@ -162,14 +165,27 @@ def combine_project_data(multi_project_data: Dict[str, Dict[str, str]]) -> Dict[
     """
 
     all_data = {}
-    for project_name, project_data in multi_project_data.items():
-        for file_name, file_data in project_data.items():
-            all_data[f'{project_name}/{file_name}'] = file_data
+    for project_data in multi_project_data.values():
+        for file_path, file_data in project_data.items():
+            all_data[file_path] = file_data
 
     return all_data
 
 
-def compute_metrics(eval_preds, fim_token_id):
+def compute_metrics(
+        eval_preds: EvalPrediction,
+        fim_token_id: int
+    ) -> Dict[str, float]:
+    """Compute metrics for finetuning.
+    
+    Args:
+        eval_preds: Evaluation predictions from a model.
+        fim_token_id: ID of the FIM hole token.
+    
+    Returns:
+        Dictionary mapping metric names to metric values.
+    """
+
     logits, labels, inputs = eval_preds
 
     # Shift logits and labels over by one
@@ -184,46 +200,69 @@ def compute_metrics(eval_preds, fim_token_id):
     select_labels = labels[no_ignore_idxs]
 
     # Calculate the accuracy
-    accuracy = (select_preds == select_labels).mean()
+    n_correct = (select_preds == select_labels).sum()
+    n_tokens = no_ignore_idxs.sum()
 
     # Calculate the mean loss
     losses = F.cross_entropy(
-        input = torch.from_numpy(logits).swapaxes(1, 2),
-        target = torch.from_numpy(labels),
+        input = logits.swapaxes(1, 2),
+        target = labels,
         ignore_index = IGNORE_INDEX,
         reduction = 'none'
     )
-    no_ignore_idxs = torch.from_numpy(no_ignore_idxs)
-    # loss_sums = losses.sum(1)
-    # n_targets = no_ignore_idxs.sum(1)
-    # mean_losses = losses.sum(1) / no_ignore_idxs.sum(1)
-    # loss = mean_losses.mean().item()
 
     # Check which inputs had the FIM token
     fim_idxs = (inputs == fim_token_id).any(1)
-    # fim_loss = (losses[fim_idxs].sum(1) / n_targets[fim_idxs]).mean().item()
-    fim_loss = (losses[fim_idxs].sum() / no_ignore_idxs[fim_idxs].sum()).item()
-    ntp_loss = (losses[~fim_idxs].sum() / no_ignore_idxs[~fim_idxs].sum()).item()
-    # combined_loss = (losses.sum() / no_ignore_idxs.sum()).item()
 
-    loss_fn = torch.nn.CrossEntropyLoss()
-    combined_loss = loss_fn(
-        torch.from_numpy(logits).reshape(-1, logits.shape[-1]),
-        torch.from_numpy(labels).reshape(-1)
-    ).item()
-    # combined_loss = F.cross_entropy(
-    #     input = torch.from_numpy(logits).swapaxes(1, 2),
-    #     target = torch.from_numpy(labels),
-    #     ignore_index = IGNORE_INDEX,
-    #     reduction = 'mean'
-    # ).item()
+    # Calculate how many tokens there are in each category
+    n_fim_tokens = no_ignore_idxs[fim_idxs].sum()
+    n_ntp_tokens = no_ignore_idxs[~fim_idxs].sum()
+
+    # Calculate the total loss for each category
+    fim_loss = losses[fim_idxs].sum()
+    ntp_loss = losses[~fim_idxs].sum()
 
     return {
-        'accuracy': accuracy,
-        'combined_loss': combined_loss,
+        'n_tokens': n_tokens,
+        'n_fim_tokens': n_fim_tokens,
+        'n_ntp_tokens': n_ntp_tokens,
+        'n_correct': n_correct,
         'fim_loss': fim_loss,
-        'ntp_loss': ntp_loss
+        'ntp_loss': ntp_loss,
+        # 'accuracy': accuracy,
+        # 'combined_loss': combined_loss,
+        # 'fim_loss': fim_loss,
+        # 'ntp_loss': ntp_loss
     }
+
+
+def collate_metrics(metrics_list: List[Dict[str, float]]) -> Dict[str, float]:
+    """Collate metrics from multiple runs.
+
+    Args:
+        metrics_list: List of dictionaries mapping metric names to metric values.
+
+    Returns:
+        Dictionary mapping metric names to metric values.
+    """
+
+    # Initialize the collated metrics
+    collated_metrics = {}
+    sum_metrics = {}
+
+    # First, sum each of the metrics
+    for metric_name in metrics_list[0].keys():
+        sum_metrics[metric_name] = 0
+        for metrics in metrics_list:
+            sum_metrics[metric_name] += metrics[metric_name]
+
+    collated_metrics['accuracy'] = sum_metrics['n_correct'] / sum_metrics['n_tokens']
+    collated_metrics['fim_loss'] = sum_metrics['fim_loss'] / sum_metrics['n_fim_tokens']
+    collated_metrics['ntp_loss'] = sum_metrics['ntp_loss'] / sum_metrics['n_ntp_tokens']
+    collated_metrics['combined_loss'] = \
+        (sum_metrics['fim_loss'] + sum_metrics['ntp_loss']) / sum_metrics['n_tokens']
+
+    return collated_metrics
 
 
 def run_eval(
@@ -239,13 +278,13 @@ def run_eval(
     # Flatten the ood_data
     all_ood_data = combine_project_data(ood_data)
 
-    # # Split primary data into training and testing sets
-    # primary_train_data = {}
-    # primary_test_data = {}
-    # for project_name, project_data in primary_data.items():
-    #     train_data, test_data = split_project_data(project_data, args.holdout_frac)
-    #     primary_train_data[project_name] = train_data
-    #     primary_test_data[project_name] = test_data
+    # Split primary data into training and testing sets
+    primary_train_data = {}
+    primary_test_data = {}
+    for project_name, project_data in primary_data.items():
+        train_data, test_data = split_project_data(project_data, args.holdout_frac)
+        primary_train_data[project_name] = train_data
+        primary_test_data[project_name] = test_data
 
     # Determine project training order for `finetune_data`
     finetune_order = list(primary_data.keys())
@@ -262,39 +301,46 @@ def run_eval(
         for project_idx, project_name in enumerate(finetune_order):
 
             # Get the data for the current project we are finetuning on
-            current_project_data = primary_data[project_name]
+            curr_train_set = primary_train_data[project_name]
+            curr_test_set = primary_test_data[project_name]
 
             # Get the data for all projects we have seen previously
             if outer_epoch == 0:
-                seen_project_data = {
-                    project_name: primary_data[project_name]
+                seen_train_set = {
+                    project_name: primary_train_data[project_name]
                     for project_name in finetune_order[:project_idx]
                 }
-                seen_project_data = combine_project_data(seen_project_data)
+                seen_test_set = {
+                    project_name: primary_train_data[project_name]
+                    for project_name in finetune_order[:project_idx]
+                }
+                seen_train_set = combine_project_data(seen_train_set)
+                seen_test_set = combine_project_data(seen_test_set)
             else:
-                seen_project_data = combine_project_data(primary_data)
+                seen_train_set = combine_project_data(primary_train_data)
+                seen_test_set = combine_project_data(primary_test_data)
 
             # Gather the eval datasets
-            eval_datasets = {'ood': all_ood_data}
-            if len(seen_project_data) > 0:
-                eval_datasets['previous_projects'] = seen_project_data
-
-            # print('ood', len(all_ood_data), [len(v) for k, v in all_ood_data.items()])
-            # print('=' * 100)
-            # print('primary', len(current_project_data), [len(v) for k, v in current_project_data.items()])
-            # print('=' * 100)
-            # print('previous_projects', len(seen_project_data), [len(v) for k, v in seen_project_data.items()])
-            # exit()
+            eval_datasets = {
+                'ood': all_ood_data,
+                'curr_project_holdout': curr_test_set,
+            }
+            if len(seen_train_set) > 0:
+                eval_datasets['previous_projects_train'] = seen_train_set
+                eval_datasets['previous_projects_holdout'] = seen_test_set
 
             train_args = dict(
-                project_data = current_project_data,
+                project_data = curr_train_set,
                 eval_data = eval_datasets,
                 output_dir = args.local_model_dir,
                 num_train_epochs = args.epochs_per_project,
                 report_to = 'wandb' if args.wandb else 'none',
                 do_eval = True,
                 evaluation_strategy = 'epoch',
-                compute_metrics = metrics_fn
+                compute_metrics = metrics_fn,
+                metrics_collator = collate_metrics,
+                # Get rid of logits to save memory (the are BIG)
+                # preprocess_logits_for_metrics = lambda logits: logits.argmax(2),
             )
             train_args = {**train_args, **vars(finetune_args)}
 

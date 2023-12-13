@@ -33,13 +33,6 @@ RESERVED_TOKENS = 32 # Number of tokens reserved for file path and code insertio
 FIM_RATE = 1 # Probability of performing FIM on a code chunk
 
 
-def build_projectcode_prompt(data: dict):
-    data_str = ""
-    for file_path, file_code in data.items():
-        data_str += f"# {file_path}\n{file_code}"
-    return data_str
-
-
 def prepare_raw_dataset(project_data: Dict[str, str]) -> Dataset:
     """Converts a project dictionary into HF dataset."""
 
@@ -260,7 +253,8 @@ class DataCollatorForSupervisedDataset(object):
 
 
 def train_supervised_projectdir(
-        project_data, eval_data=None, compute_metrics=None, **kwargs):
+        project_data, eval_data=None, compute_metrics=None,
+        metrics_collator=None, **kwargs):
     # Eval data must be in format {name_of_dataset: {file_name: file_contents, ...}},
     # even if only one eval dataset
     # ModelArguments, DataArguments, TrainingArguments
@@ -272,10 +266,6 @@ def train_supervised_projectdir(
     # TODO: this is required for training LORA and QLORA; it should be removed in the case that it harms performance
     training_args.remove_unused_columns = False
     training_args.include_inputs_for_metrics = True
-
-    # Wandb logging uses multiprocessing, which may interfere with the tokenizer
-    if training_args.report_to == 'wandb':
-        os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
     if training_args.local_rank == 0:
         print('=' * 100)
@@ -301,29 +291,18 @@ def train_supervised_projectdir(
         for dataset_name, data in eval_data.items():
             eval_datasets[dataset_name] = project_to_dataset(data, tokenizer)
 
-        # if len(eval_datasets) == 1:
-        #     eval_datasets = eval_datasets[list(eval_datasets.keys())[0]]
-
-    # if training_args.local_rank == 0:
-    #     torch.distributed.barrier()
-
-    # if training_args.local_rank == 0:
-    #     print("Training dataset samples:", len(train_dataset))
-    #     # for index in random.sample(range(len(train_dataset)), 3):
-    #     for index in range(3):  # Print the first 3 samples
-    #         print(train_dataset[index]['input_ids'])
-    #         print(f"Sample {index} of the training set: {train_dataset[index]['input_ids']}," +
-    #               f"{train_dataset[index]['labels']}.")
-    #         print(f"Sample {index} of the training set:" +
-    #               f"{tokenizer.decode(list(train_dataset[index]['input_ids']))}.")
-
     data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer)
     data_module = dict(train_dataset=train_dataset,
                        eval_dataset=eval_datasets, data_collator=data_collator)
 
     trainer = ContinualTrainer(
-        model=model, tokenizer=tokenizer, args=training_args,
-        compute_metrics=compute_metrics, **data_module)
+        model = model,
+        tokenizer = tokenizer,
+        args = training_args,
+        compute_metrics = compute_metrics,
+        metrics_collator = metrics_collator,
+        **data_module
+    )
 
     trainer.train()
     modeling.GLOBAL_MODEL = trainer.model
