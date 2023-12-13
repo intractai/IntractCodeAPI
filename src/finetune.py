@@ -1,18 +1,16 @@
-import copy
 from dataclasses import dataclass, field
-from pathlib import Path
-import random
-from typing import Any, List, Optional, Dict, Sequence
+import os
+from typing import Any, Optional, Dict, Sequence
 import warnings
 
-from datasets import load_dataset, Dataset
+from datasets import Dataset
 import numpy as np
 import torch
 import torch.distributed
 import transformers
-from transformers import Trainer
 
 from src import modeling
+from src.trainer import ContinualTrainer
 
 
 # Labels with -100 index are ignored in the loss calculation
@@ -20,9 +18,9 @@ from src import modeling
 IGNORE_INDEX = -100
 
 EOT_TOKEN = "<|EOT|>"
-FIM_BEGIN_TOKEN = "<｜fim▁begin｜>"
-FIM_HOLE_TOKEN = "<｜fim▁hole｜>"
-FIM_END_TOKEN = "<｜fim▁end｜>"
+FIM_BEGIN_TOKEN = "<｜fim▁begin｜>" # 32016
+FIM_HOLE_TOKEN = "<｜fim▁hole｜>" # 32015
+FIM_END_TOKEN = "<｜fim▁end｜>" # 32017
 
 EOT_ID = None
 FIM_BEGIN_ID = None
@@ -158,6 +156,7 @@ def prepare_train_dataset(elements: Dict[str, Any], tokenizer) -> Dict[str, Any]
 
     input_ids = []
     labels = []
+    sample_types = []
 
     # First generate next token prediction training data
 
@@ -176,6 +175,7 @@ def prepare_train_dataset(elements: Dict[str, Any], tokenizer) -> Dict[str, Any]
             code_tokens + \
             [IGNORE_INDEX]
         )
+        sample_types.append('ntp')
 
     # Then generate fill in the blank training data
 
@@ -187,10 +187,12 @@ def prepare_train_dataset(elements: Dict[str, Any], tokenizer) -> Dict[str, Any]
             else:
                 input_ids.append(fim_sample['input_ids'])
                 labels.append(fim_sample['labels'])
+                sample_types.append('fim')
 
     return dict(
         input_ids=input_ids,
-        labels=labels
+        labels=labels,
+        sample_types=sample_types
     )
 
 
@@ -257,7 +259,8 @@ class DataCollatorForSupervisedDataset(object):
         )
 
 
-def train_supervised_projectdir(project_data, eval_data=None, **kwargs):
+def train_supervised_projectdir(
+        project_data, eval_data=None, compute_metrics=None, **kwargs):
     # Eval data must be in format {name_of_dataset: {file_name: file_contents, ...}},
     # even if only one eval dataset
     # ModelArguments, DataArguments, TrainingArguments
@@ -267,7 +270,12 @@ def train_supervised_projectdir(project_data, eval_data=None, **kwargs):
     training_args = parser.parse_dict(kwargs)[0]
     training_args.do_train = True
     # TODO: this is required for training LORA and QLORA; it should be removed in the case that it harms performance
-    training_args.remove_unused_columns = False 
+    training_args.remove_unused_columns = False
+    training_args.include_inputs_for_metrics = True
+
+    # Wandb logging uses multiprocessing, which may interfere with the tokenizer
+    if training_args.report_to == 'wandb':
+        os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
     if training_args.local_rank == 0:
         print('=' * 100)
@@ -293,8 +301,8 @@ def train_supervised_projectdir(project_data, eval_data=None, **kwargs):
         for dataset_name, data in eval_data.items():
             eval_datasets[dataset_name] = project_to_dataset(data, tokenizer)
 
-        if len(eval_datasets) == 1:
-            eval_datasets = eval_datasets[list(eval_datasets.keys())[0]]
+        # if len(eval_datasets) == 1:
+        #     eval_datasets = eval_datasets[list(eval_datasets.keys())[0]]
 
     # if training_args.local_rank == 0:
     #     torch.distributed.barrier()
@@ -313,8 +321,9 @@ def train_supervised_projectdir(project_data, eval_data=None, **kwargs):
     data_module = dict(train_dataset=train_dataset,
                        eval_dataset=eval_datasets, data_collator=data_collator)
 
-    trainer = Trainer(model=model, tokenizer=tokenizer,
-                      args=training_args, **data_module)
+    trainer = ContinualTrainer(
+        model=model, tokenizer=tokenizer, args=training_args,
+        compute_metrics=compute_metrics, **data_module)
 
     trainer.train()
     modeling.GLOBAL_MODEL = trainer.model
