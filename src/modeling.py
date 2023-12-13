@@ -1,3 +1,4 @@
+from argparse import Namespace
 import os
 from pathlib import Path
 
@@ -42,13 +43,23 @@ def thread_hook(*args):
         and current_thread_id != GLOBAL_MAIN_THREAD_ID:
         raise CancelledError("Cancelled by new request")
 
-def initialize_model(model_name, local_dir, args):
+def get_model_dtype(args: Namespace):
+    """Get the model dtype based on the arguments."""
+
+    if args.fp16:
+        return torch.float16
+    elif args.bf16:
+        return torch.bfloat16
+    else:
+        return torch.float32
+
+def initialize_model(model_name: str, local_dir: str, args: Namespace):
     """Download a model from the HuggingFace Hub and save it to the local directory."""
 
     global GLOBAL_MODEL, GLOBAL_TOKENIZER, GLOBAL_MAIN_THREAD_ID
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    dtype = torch.bfloat16 if args.fp16 else torch.float32
+    dtype = get_model_dtype(args)
     # If device is cuda and using fp16
     use_flash_attention = device.type == "cuda" and args.fp16
 
@@ -61,6 +72,8 @@ def initialize_model(model_name, local_dir, args):
         snapshot_download(model_name, local_dir=model_dir, local_dir_use_symlinks=False,
                           ignore_patterns=['*.msgpack', '*.h5'])
 
+    os.environ['TOKENIZERS_PARALLELISM'] = \
+        os.environ.get('TOKENIZERS_PARALLELISM', 'true')
     tokenizer = AutoTokenizer.from_pretrained(model_dir)
     tokenizer.model_max_length = args.context_length
 
