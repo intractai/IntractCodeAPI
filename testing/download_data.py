@@ -31,6 +31,7 @@ UNALLOWED_FILE_TYPES = set([
     '.pptx', '.webp', '.stl', '.vcxproj', '.sln', '.vcxproj.filters',
     '.svg', '.ico', '.icns', '.ttf', '.woff', '.woff2', '.eot', '.mp3',
     '.mp4', '.wav', '.mov', '.avi', '.mpg', '.mpeg', '.flv', '.wmv',
+    '.DS_Store', '.gitmodules', '.gitattributes',
 ])
 
 
@@ -173,6 +174,7 @@ def download_and_save_repo(
     z = zipfile.ZipFile(io.BytesIO(response.content))
 
     # Delete any files that are too large or not allowed
+    # Recursively go through all files
     for file in z.filelist:
         if file.file_size > max_file_size_kb * 1024:
             z.filelist.remove(file)
