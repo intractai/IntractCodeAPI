@@ -52,6 +52,9 @@ def initialize_model(model_name, local_dir, args):
     # If device is cuda and using fp16
     use_flash_attention = device.type == "cuda" and args.fp16
 
+    if use_flash_attention:
+        print('Using flash attention')
+
     # Ideally we should check all the files, but for now just check one
     model_dir = os.path.join(local_dir, model_name)
     if not os.path.isfile(os.path.join(model_dir, 'config.json')):
@@ -87,6 +90,9 @@ def initialize_lora_model(model_name: str, local_dir: Path, args) -> None:
     dtype = torch.bfloat16 if args.fp16 else torch.float32
     use_flash_attention = device.type == "cuda" and args.fp16
 
+    if use_flash_attention:
+        print('Using flash attention')
+
     # Ideally we should check all the files, but for now just check one
     model_dir = os.path.join(local_dir, model_name)
     if not os.path.isfile(os.path.join(model_dir, 'config.json')):
@@ -100,7 +106,7 @@ def initialize_lora_model(model_name: str, local_dir: Path, args) -> None:
         model_dir, use_flash_attention_2=use_flash_attention,
         device_map=device, torch_dtype=dtype
         )
-    
+
     modules = _find_all_linear_names(args, model)
     print('Modules to be fine-tuned: ', modules)
     config = LoraConfig(
@@ -137,6 +143,9 @@ def initialize_qlora_model(model_name: str, local_dir: Path, args) -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     dtype = torch.bfloat16 if args.fp16 else torch.float32
     use_flash_attention = device.type == "cuda" and args.fp16
+
+    if use_flash_attention:
+        print('Using flash attention')
 
     # Ideally we should check all the files, but for now just check one
     model_dir = os.path.join(local_dir, model_name)
