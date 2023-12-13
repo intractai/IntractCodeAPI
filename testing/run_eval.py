@@ -2,7 +2,6 @@
 
 import argparse
 from argparse import Namespace
-import os
 from pathlib import Path
 import random
 import sys
@@ -10,9 +9,11 @@ from typing import Dict, Optional
 
 import numpy as np
 import torch
+from torch.nn import functional as F
 
 sys.path.append('./')
 from src import finetune, modeling
+from src.finetune import IGNORE_INDEX
 from src.arg_handling import parse_args
 
 
@@ -168,6 +169,63 @@ def combine_project_data(multi_project_data: Dict[str, Dict[str, str]]) -> Dict[
     return all_data
 
 
+def compute_metrics(eval_preds, fim_token_id):
+    logits, labels, inputs = eval_preds
+
+    # Shift logits and labels over by one
+    logits = logits[:, :-1, :]
+    labels = labels[:, 1:]
+
+    # Gather all preds and labels where the label is not -100
+    preds = logits.argmax(2)
+    no_ignore_idxs = (labels != IGNORE_INDEX)
+
+    select_preds = preds[no_ignore_idxs]
+    select_labels = labels[no_ignore_idxs]
+
+    # Calculate the accuracy
+    accuracy = (select_preds == select_labels).mean()
+
+    # Calculate the mean loss
+    losses = F.cross_entropy(
+        input = torch.from_numpy(logits).swapaxes(1, 2),
+        target = torch.from_numpy(labels),
+        ignore_index = IGNORE_INDEX,
+        reduction = 'none'
+    )
+    no_ignore_idxs = torch.from_numpy(no_ignore_idxs)
+    # loss_sums = losses.sum(1)
+    # n_targets = no_ignore_idxs.sum(1)
+    # mean_losses = losses.sum(1) / no_ignore_idxs.sum(1)
+    # loss = mean_losses.mean().item()
+
+    # Check which inputs had the FIM token
+    fim_idxs = (inputs == fim_token_id).any(1)
+    # fim_loss = (losses[fim_idxs].sum(1) / n_targets[fim_idxs]).mean().item()
+    fim_loss = (losses[fim_idxs].sum() / no_ignore_idxs[fim_idxs].sum()).item()
+    ntp_loss = (losses[~fim_idxs].sum() / no_ignore_idxs[~fim_idxs].sum()).item()
+    # combined_loss = (losses.sum() / no_ignore_idxs.sum()).item()
+
+    loss_fn = torch.nn.CrossEntropyLoss()
+    combined_loss = loss_fn(
+        torch.from_numpy(logits).reshape(-1, logits.shape[-1]),
+        torch.from_numpy(labels).reshape(-1)
+    ).item()
+    # combined_loss = F.cross_entropy(
+    #     input = torch.from_numpy(logits).swapaxes(1, 2),
+    #     target = torch.from_numpy(labels),
+    #     ignore_index = IGNORE_INDEX,
+    #     reduction = 'mean'
+    # ).item()
+
+    return {
+        'accuracy': accuracy,
+        'combined_loss': combined_loss,
+        'fim_loss': fim_loss,
+        'ntp_loss': ntp_loss
+    }
+
+
 def run_eval(
         args: Namespace,
         finetune_args: Namespace):
@@ -192,6 +250,11 @@ def run_eval(
     # Determine project training order for `finetune_data`
     finetune_order = list(primary_data.keys())
     np.random.shuffle(finetune_order)
+
+    # Preare the compute metrics function
+    tokenizer = modeling.GLOBAL_TOKENIZER
+    fim_token_id = tokenizer.vocab[finetune.FIM_HOLE_TOKEN]
+    metrics_fn = lambda eval_preds: compute_metrics(eval_preds, fim_token_id)
 
     # Train for an epoch on each primary project while periodically logging metrics
     print('Starting training...')
@@ -223,18 +286,21 @@ def run_eval(
             # print('previous_projects', len(seen_project_data), [len(v) for k, v in seen_project_data.items()])
             # exit()
 
+            train_args = dict(
+                project_data = current_project_data,
+                eval_data = eval_datasets,
+                output_dir = args.local_model_dir,
+                num_train_epochs = args.epochs_per_project,
+                report_to = 'wandb' if args.wandb else 'none',
+                do_eval = True,
+                evaluation_strategy = 'epoch',
+                compute_metrics = metrics_fn
+            )
+            train_args = {**train_args, **vars(finetune_args)}
+
             # Finetune on the current project
             print(f'Training on project {project_name}...')
-            finetune.train_supervised_projectdir(
-                project_data=current_project_data,
-                eval_data=eval_datasets,
-                output_dir=args.local_model_dir,
-                num_train_epochs=args.epochs_per_project,
-                report_to='wandb' if args.wandb else 'none',
-                do_eval=True,
-                evaluation_strategy='epoch',
-                **vars(finetune_args)
-            )
+            finetune.train_supervised_projectdir(**train_args)
 
 
 if __name__ == '__main__':
@@ -248,7 +314,7 @@ if __name__ == '__main__':
     torch.manual_seed(args.seed)
 
     # Load model
-    modeling.intialize_model(args.model_dir, args.local_model_dir, args)
+    modeling.initialize_model(args.model_dir, args.local_model_dir, args)
 
     # Finetune and evaluate
     run_eval(args, env_args['finetune'])
