@@ -30,11 +30,14 @@ def parse_args(env_prefixes: Optional[List] = None) -> Tuple[Namespace, Dict[str
                         help="Path to store the model")
     parser.add_argument("--fp16", action="store_true",
                         help="Run with fp16 intead of fp32.")
+    parser.add_argument("--bf16", action="store_true",
+                        help="Run with bf16 intead of fp32.")
     parser.add_argument("--context_length", type=int, default=512,
                         help="Maximum context length")
     parser.set_defaults(fp16=False)
 
     known_args, unknown_args = parser.parse_known_args()
+    validate_args(known_args)
 
     # Add environemnt variables if relevant
     env_args = {}
@@ -57,3 +60,9 @@ def parse_args(env_prefixes: Optional[List] = None) -> Tuple[Namespace, Dict[str
             # known_args = Namespace(**{**vars(known_args), **env_vars})
 
     return known_args, env_args, unknown_args
+
+
+def validate_args(args):
+    """Validate the arguments."""
+
+    assert not (args.fp16 and args.bf16), "Cannot run with both fp16 and bf16!"
