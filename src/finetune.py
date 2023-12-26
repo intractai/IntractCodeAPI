@@ -254,11 +254,13 @@ class DataCollatorForSupervisedDataset(object):
 
 def train_supervised_projectdir(
         project_data, eval_data=None, compute_metrics=None,
-        metrics_collator=None, **kwargs):
+        metrics_collator=None, train_cfg: dict = None, **kwargs):
     # Eval data must be in format {name_of_dataset: {file_name: file_contents, ...}},
     # even if only one eval dataset
     # ModelArguments, DataArguments, TrainingArguments
     # torch.set_num_threads(1)
+
+    model_provider = modeling.ModelProvider.get_instance()
 
     parser = transformers.HfArgumentParser((TrainingArguments))
     training_args = parser.parse_dict(kwargs)[0]
@@ -271,16 +273,14 @@ def train_supervised_projectdir(
         print('=' * 100)
         print(training_args)
 
-    tokenizer = modeling.GLOBAL_TOKENIZER
+    tokenizer = model_provider.get_model_utils()['tokenizer']
 
     print("PAD Token:", tokenizer.pad_token, tokenizer.pad_token_id)
     print("BOS Token", tokenizer.bos_token, tokenizer.bos_token_id)
     print("EOS Token", tokenizer.eos_token, tokenizer.eos_token_id)
 
-    # Store reference to the model and tokenizer in the model module
-    model = modeling.GLOBAL_MODEL
-
-    # assert model
+     # Store reference to the model and tokenizer in the model module
+    model = model_provider.get_model()
 
     train_dataset = project_to_dataset(project_data, tokenizer)
 
@@ -305,7 +305,7 @@ def train_supervised_projectdir(
     )
 
     trainer.train()
-    modeling.GLOBAL_MODEL = trainer.model
+    model_provider.update_model(trainer.model)
 
     # Release all the memory used by the trainer
     trainer.model = None
