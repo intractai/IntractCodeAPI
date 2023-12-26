@@ -10,3 +10,5 @@ tqdm
 bitsandbytes
 peft
 pytest
+hydra-core
+omegaconf
