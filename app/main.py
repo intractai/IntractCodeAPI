@@ -15,6 +15,7 @@ from src import modeling, config
 from src.arg_handling import parse_args
 from app.routers import generator, fine_tuner
 
+
 logger = logging.getLogger(__name__)
 app = FastAPI()
 
@@ -51,6 +52,7 @@ def main(cfg: DictConfig):
     app.include_router(generator.router)
     app.include_router(fine_tuner.router)
     uvicorn.run(app, **cfg.server_cfg)
+    
     
 if __name__ == '__main__':
     main()

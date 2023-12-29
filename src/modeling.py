@@ -269,7 +269,6 @@ class ModelProvider:
     
     def update_model(self, model: torch.nn.Module):
         with self._lock:  # Acquire the lock for thread safety
-            # Load the new model based on the new configuration
             self._model = model
 
 
