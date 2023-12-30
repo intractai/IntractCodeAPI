@@ -9,3 +9,4 @@ attrdict
 tqdm
 bitsandbytes
 peft
+pytest
