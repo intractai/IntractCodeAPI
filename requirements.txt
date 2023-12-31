@@ -12,3 +12,4 @@ peft
 pytest
 hydra-core
 omegaconf
+mock
