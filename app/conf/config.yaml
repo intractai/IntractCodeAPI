@@ -1,0 +1,32 @@
+server_cfg:
+  host: 127.0.0.1
+  port: 8000
+  # reload: True
+
+model_cfg:
+  model_dir: '??'
+  save_model_dir: '??'
+  model_name: ${oc.env:MODEL_NAME, deepseek-ai/deepseek-coder-1.3b-base}
+  model_type: standard
+  fp16: False 
+  bf16: False
+  context_length: 512
+  device: cpu
+  use_flash_attention: True
+
+  # LOARA Parameters, if selected
+  lora_r: 64
+  lora_alpha: 16
+  lora_dropout: 0.01
+
+  # QLOARA Parameters, if selected
+  bits: 4
+  double_quant: True
+  quant_type: nf4
+  optim: paged_adamw_32bit
+  gradient_checkpointing: True
+
+train_cfg:
+  do_train: True
+  remove_unused_columns: False
+  include_inputs_for_metrics: True
