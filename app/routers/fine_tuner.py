@@ -53,6 +53,6 @@ def finetune_task(item: ProjectFinetuneData, cfg: Namespace):
     train_cfg = cfg.train_cfg
     finetune.train_supervised_projectdir(
         item.project_dict, output_dir=model_cfg.save_model_dir,
-        report_to='none', train_cfg=vars(train_cfg))
+        report_to='none', train_cfg=train_cfg)
 
     return {"result": "success"}

@@ -263,11 +263,7 @@ def train_supervised_projectdir(
     model_provider = modeling.ModelProvider.get_instance()
 
     parser = transformers.HfArgumentParser((TrainingArguments))
-    training_args = parser.parse_dict(kwargs)[0]
-    training_args.do_train = True
-    # TODO: this is required for training LORA and QLORA; it should be removed in the case that it harms performance
-    training_args.remove_unused_columns = False
-    training_args.include_inputs_for_metrics = True
+    training_args = parser.parse_dict({**train_cfg, **kwargs})[0]
 
     if training_args.local_rank == 0:
         print('=' * 100)
