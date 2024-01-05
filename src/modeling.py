@@ -3,14 +3,12 @@ from argparse import Namespace
 import os
 import abc
 import logging
-from pathlib import Path
 
 import torch
 import bitsandbytes as bnb
 from huggingface_hub import snapshot_download
 from transformers import AutoTokenizer, AutoModelForCausalLM
-from transformers import Trainer, BitsAndBytesConfig
-from datasets import load_dataset
+from transformers import BitsAndBytesConfig
 from peft import (
     prepare_model_for_kbit_training,
     LoraConfig,
@@ -33,8 +31,8 @@ def thread_hook(*args):
         and current_thread_id != GLOBAL_GENERATE_THREAD_ID \
         and current_thread_id != GLOBAL_MAIN_THREAD_ID:
         raise CancelledError("Cancelled by new request")
-    
-    
+
+
 class ModelLoader(abc.ABC):
     """This class has the responsibility of providing the functionality to load the model and its utilities, including tokenizer.
 
@@ -52,14 +50,16 @@ class ModelLoader(abc.ABC):
             return torch.bfloat16
         else:
             return torch.float32
-    
+
     def _determine_device(self):
         if self._cfg.device == 'cpu':
-            return torch.device("cpu")
-        elif self._cfg.device == 'gpu':
-            assert torch.cuda.is_available(), "GPU is not available"
-            return torch.device("cuda")
-        
+            return torch.device('cpu')
+        elif self._cfg.device == 'cuda':
+            assert torch.cuda.is_available(), 'CUDA device is not available'
+            return torch.device('cuda')
+        else:
+            raise Exception(f"Unknown device: {self._cfg.device}")
+
     def _find_all_linear_names(self, model):
         cls = bnb.nn.Linear4bit if self._cfg.bits == 4 else \
             (bnb.nn.Linear8bitLt if self._cfg.bits == 8 else torch.nn.Linear)
@@ -72,9 +72,18 @@ class ModelLoader(abc.ABC):
         if 'lm_head' in lora_module_names: # needed for 16-bit
             lora_module_names.remove('lm_head')
         return list(lora_module_names)
-        
+
     def _determine_flash_attention(self):
-        return self._cfg.device == 'gpu' and self._cfg.fp16
+        if not self._cfg.use_flash_attention:
+            return False
+
+        flash_attention_compatible = \
+            'cuda' in self._cfg.device and (self._cfg.fp16 or self._cfg.bf16)
+
+        if not flash_attention_compatible:
+            raise ValueError("Flash attention is only compatible with CUDA and FP16/BF16!")
+
+        return True
 
     @abc.abstractmethod
     def load_model(self) -> Tuple[torch.nn.Module, dict]:
@@ -121,7 +130,7 @@ class StandardModelLoader(ModelLoader):
         return model, {'tokenizer': tokenizer}
 
 class LoraModelLoader(ModelLoader):
-    
+
     def load_model(self) -> Tuple[torch.nn.Module, dict]:
 
         global GLOBAL_MAIN_THREAD_ID
@@ -134,7 +143,7 @@ class LoraModelLoader(ModelLoader):
         use_flash_attention = self._determine_flash_attention()
 
         if use_flash_attention:
-            logger.info('Using flash attention')
+            logger.info("Using flash attention")
 
         # Ideally we should check all the files, but for now just check one
         model_dir = os.path.join(model_dir, model_name)
@@ -151,7 +160,7 @@ class LoraModelLoader(ModelLoader):
             )
 
         modules = self._find_all_linear_names(model)
-        logger.info('Modules to be fine-tuned: ', modules)
+        logger.info(f"Modules to be fine-tuned: {modules}")
         config = LoraConfig(
                 r=self._cfg.lora_r,
                 lora_alpha=self._cfg.lora_alpha,
@@ -175,7 +184,7 @@ class QLoraModelLoader(ModelLoader):
     def load_model(self) -> Tuple[torch.nn.Module, dict]:
 
         global GLOBAL_MAIN_THREAD_ID
-            
+
         model_dir = self._cfg.model_dir
         model_name = self._cfg.model_name
 
@@ -212,11 +221,12 @@ class QLoraModelLoader(ModelLoader):
             load_in_8bit=self._cfg.bits == 8,
             config=bb_config
             )
-        
-        model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=self._cfg.gradient_checkpointing)
+
+        model = prepare_model_for_kbit_training(
+            model, use_gradient_checkpointing=self._cfg.gradient_checkpointing)
 
         modules = self._find_all_linear_names(model)
-        logger.info('Modules to be fine-tuned: ', modules)
+        logger.info(f"Modules to be fine-tuned: {modules}")
         config = LoraConfig(
                 r=self._cfg.lora_r,
                 lora_alpha=self._cfg.lora_alpha,
@@ -263,10 +273,10 @@ class ModelProvider:
 
     def get_model(self):
         return self._model
-    
+
     def get_model_utils(self):
         return self._model_utils
-    
+
     def update_model(self, model: torch.nn.Module):
         with self._lock:  # Acquire the lock for thread safety
             self._model = model

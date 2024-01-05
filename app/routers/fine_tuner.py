@@ -3,7 +3,6 @@ from argparse import Namespace
 import logging
 import threading
 
-import torch
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from concurrent.futures import ThreadPoolExecutor, CancelledError
@@ -21,8 +20,8 @@ class ProjectFinetuneData(BaseModel):
 
 @router.post("/finetune/project")
 def finetune_project(item: ProjectFinetuneData, cfg: Annotated[Namespace, Depends(config.get_config)]):
-    for file_name, file_code in item.project_dict.items():
-        logger.info(f">>> {file_name}\n\n{file_code}\n\n")
+    # for file_name, file_code in item.project_dict.items():
+    #     logger.info(f">>> {file_name}\n\n{file_code}\n\n")
 
     # item.project_dict = {k: v for k, v in item.project_dict.items()
     #                 if not k.startswith('ninjax') \
@@ -47,7 +46,7 @@ def finetune_project(item: ProjectFinetuneData, cfg: Annotated[Namespace, Depend
 
 
 def finetune_task(item: ProjectFinetuneData, cfg: Namespace):
-    #Print the current thread id to show that it is different for each request
+    # Print the current thread id to show that it is different for each request
     modeling.GLOBAL_GENERATE_THREAD_ID = threading.get_ident()
 
     model_cfg = cfg.model_cfg
