@@ -4,15 +4,15 @@ server_cfg:
   # reload: True
 
 model_cfg:
-  model_dir: '??'
-  save_model_dir: '??'
+  save_model_dir: "saved_models/"
+  model_dir: ".model/"
   model_name: ${oc.env:MODEL_NAME, deepseek-ai/deepseek-coder-1.3b-base}
   model_type: standard
   fp16: False 
   bf16: False
   context_length: 512
   device: cpu
-  use_flash_attention: True
+  use_flash_attention: False
 
   # LOARA Parameters, if selected
   lora_r: 64
@@ -30,3 +30,7 @@ train_cfg:
   do_train: True
   remove_unused_columns: False
   include_inputs_for_metrics: True
+  per_device_train_batch_size: 1
+  logging_steps: 8
+  logging_strategy: steps
+  num_train_epochs: 2
