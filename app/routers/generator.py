@@ -1,27 +1,20 @@
 from argparse import Namespace
 import logging
 import threading
-from typing import Annotated, Optional
+from typing import Annotated, Optional, Union
 
 from concurrent.futures import ThreadPoolExecutor, CancelledError
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+from transformers import PreTrainedTokenizer
 import torch
-from transformers.tokenization_utils_base import BatchEncoding
 
 from src import modeling, config
-from src.modeling import FIM_BEGIN_TOKEN, FIM_HOLE_TOKEN, FIM_END_TOKEN
+from src.data_formatting import format_inference_input
 
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-
-# When doing FIM generation and truncation is required, this is the
-# target fraction of the context that should be prior context
-# (the rest is proceeding context)
-PRIOR_CONTEXT_FRAC = 0.8
-MAX_PREFIX_LEN = 48
 
 
 class GenerateData(BaseModel):
@@ -58,117 +51,31 @@ def generate(item: GenerateData, cfg: Annotated[Namespace, Depends(config.get_co
     return result
 
 
-def format_input(item: GenerateData, model, tokenizer, cfg: Namespace):
+def format_input(
+        item: GenerateData,
+        device: Union[str, torch.device],
+        tokenizer: PreTrainedTokenizer,
+        cfg: Namespace):
     """Format the input for the model.
+
+    Depending on the input, the example will either be formatted as
+    a next token prediction problem or a fill in the middle problem.
     
     Args:
         item (GenerateData): The input data from a REST request.
-        model (Model): The ML model.
+        model (Model): The model.
         tokenizer (Tokenizer): The tokenizer.
         cfg (Namespace): The config global config.
     """
 
-    # If proceeding context is not provided, use next token prediction
-    if not item.proceeding_context:
-        fp_tokens = tokenizer.encode(
-            f'# {item.file_path}\n',
-            return_tensors='pt',
-            add_special_tokens=False,
-            truncation=True,
-            max_length=MAX_PREFIX_LEN,
-        )[0]
-
-        max_context_length = \
-            cfg.model_cfg.context_length - len(fp_tokens) - item.max_decode_length
-        context_tokens = tokenizer.encode(
-            item.prior_context,
-            return_tensors='pt',
-            add_special_tokens=False,
-            truncation=True,
-            max_length=max_context_length,
-        )[0]
-
-        input_ids = torch.cat([
-            torch.tensor([tokenizer.bos_token_id]),
-            fp_tokens,
-            context_tokens,
-        ]).unsqueeze(0)
-
-        inputs = BatchEncoding({
-            'input_ids': input_ids,
-            'attention_mask': input_ids.ne(tokenizer.pad_token_id).long(),
-        })
-
-    # Otherwise, do FIM
-    else:
-        fp_tokens = tokenizer.encode(
-            f'# {item.file_path}\n',
-            return_tensors='pt',
-            add_special_tokens=False,
-            truncation=True,
-            max_length=MAX_PREFIX_LEN,
-        )[0]
-        prefix = tokenizer.encode(
-            item.prior_context,
-            return_tensors='pt',
-            add_special_tokens=False
-        )[0]
-        suffix = tokenizer.encode(
-            item.proceeding_context,
-            return_tensors='pt',
-            add_special_tokens=False
-        )[0]
-
-        # Get the length of the prior and proceeding context, then truncate
-        # as necessary
-
-        # The length of the prompt + generated response cannot be longer than
-        # the max context length of the model
-        # -4 is for the 4 FIM and BOS special tokens added to the prompt
-        max_context_length = \
-            cfg.model_cfg.context_length - len(fp_tokens) - item.max_decode_length +  - 4
-        raw_text_length = len(prefix) + len(suffix)
-
-        # If the raw text is too long, truncate it
-        if raw_text_length > max_context_length:
-            max_prefix_length = int(max_context_length * PRIOR_CONTEXT_FRAC)
-            max_suffix_length = max_context_length - max_prefix_length
-
-            # If both the prefix and suffix are too long, truncate both
-            if len(prefix) > max_prefix_length and len(suffix) > max_suffix_length:
-                prefix = prefix[:max_prefix_length]
-                suffix = suffix[:max_suffix_length]
-
-            # If just the prefix is too long, truncate it
-            elif len(prefix) > max_prefix_length:
-                target_length = max_context_length - len(suffix)
-                prefix = prefix[:target_length]
-
-            # If just the suffix is too long, truncate it
-            else:
-                target_length = max_context_length - len(prefix)
-                suffix = suffix[:target_length]
-
-        prefix_tok_id = tokenizer.vocab[FIM_BEGIN_TOKEN]
-        middle_tok_id = tokenizer.vocab[FIM_HOLE_TOKEN]
-        suffix_tok_id = tokenizer.vocab[FIM_END_TOKEN]
-
-        # Construct the final prompt
-        input_ids = torch.cat([
-            torch.tensor([tokenizer.bos_token_id]),
-            torch.tensor([prefix_tok_id]), fp_tokens, prefix,
-            torch.tensor([middle_tok_id]), suffix,
-            torch.tensor([suffix_tok_id]),
-        ]).unsqueeze(0)
-
-        inputs = BatchEncoding({
-            'input_ids': input_ids,
-            'attention_mask': input_ids.ne(tokenizer.pad_token_id).long(),
-        })
-
-    inputs = inputs.to(model.device)
-
-    return inputs
+    return format_inference_input(
+        preceeding_text = item.prior_context,
+        tokenizer = tokenizer,
+        cfg = cfg,
+        proceeding_text = item.proceeding_context,
+        file_path = item.file_path,
+        max_decode_length = item.max_decode_length,
+    ).to(device)
 
 
 def generate_task(item: GenerateData, cfg: Namespace):
@@ -180,7 +87,7 @@ def generate_task(item: GenerateData, cfg: Namespace):
     model = model_provider.get_model()
     tokenizer = model_provider.get_model_utils()['tokenizer']
 
-    inputs = format_input(item, model, tokenizer, cfg)
+    inputs = format_input(item, model.device, tokenizer, cfg)
 
     outputs = model.generate(
         **inputs, max_new_tokens=item.max_decode_length,
