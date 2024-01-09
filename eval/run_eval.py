@@ -1,21 +1,22 @@
 """Test finetuning a model with the given arguments."""
 
-import argparse
 from argparse import Namespace
+import logging
 from pathlib import Path
 import random
 import sys
 from typing import Dict, List, Optional
 
+import hydra
 import numpy as np
+from omegaconf import DictConfig, OmegaConf
 import torch
 from torch.nn import functional as F
 from transformers.trainer_utils import EvalPrediction
 
 sys.path.append('./')
-from src import finetune, modeling
-from src.arg_handling import parse_args
-from src.finetune import IGNORE_INDEX
+from src import config, finetune, modeling
+from src.data_formatting import IGNORE_INDEX, FIM_HOLE_TOKEN
 
 
 # Relative to this file
@@ -23,49 +24,7 @@ FINETUNE_DATA_DIR = 'data/finetune/'
 OOD_DATA_DIR = 'data/ood/'
 
 
-def parse_testing_args(raw_args: list[str]):
-    """Parse arguments for testing finetuning."""
-
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument('--holdout_frac', type=float, default=0.2,
-                        help='Fraction of finetuning data per project ' + \
-                             'to hold out for testing.')
-    parser.add_argument('--total_epochs', type=int, default=2,
-                        help='Total number of epochs over all data.')
-    parser.add_argument('--epochs_per_project', type=int, default=1,
-                        help='Number of epochs to train on each project.')
-    parser.add_argument('--n_ood_projects', type=int, default=10,
-                        help='Number of projects to use in OOD dataset.')
-    parser.add_argument('--n_finetune_projects', type=int, default=10,
-                        help='Number of projects to finetune on')
-    parser.add_argument('--seed', type=int, default=8)
-    parser.add_argument('--wandb', action='store_true', default=False,
-                        help='Whether to log to wandb.')
-
-    parsed_args = parser.parse_args(raw_args)
-    return parsed_args
-
-
-def train(
-        project_data: Dict[str, str],
-        args: Namespace,
-        finetune_args: Namespace):
-    """Finetune a model on files from a given project.
-
-    Args:
-        project_data: Dictionary mapping file paths to file contents.
-        args: Generic arguments for the model.
-        finetune_args: Arguments for finetuning.
-    """
-
-    modeling.intialize_model(args.model_dir, args.local_model_dir, args)
-    finetune.train_supervised_projectdir(
-        project_data,
-        output_dir=args.local_model_dir,
-        report_to='none',
-        **vars(finetune_args)
-    )
+logger = logging.getLogger(__name__)
 
 
 # Run eval steps:
@@ -84,6 +43,7 @@ def train(
 #   - Number of epochs per project
 #   - Percent FIM
 #   - Whether to prefix prompts with file path & line number
+
 
 def load_projects(relative_path: str, n: Optional[int] = None) -> Dict[str, Dict[str, str]]:
     """Load project data from a directory.
@@ -114,7 +74,7 @@ def load_projects(relative_path: str, n: Optional[int] = None) -> Dict[str, Dict
                             rel_path = file_path.relative_to(project_path.parent)
                             project_data[str(rel_path)] = file_text
                     except UnicodeDecodeError:
-                        print(f'Error reading file {file_path}. Skipping...')
+                        logging.warning(f'Error reading file {file_path}. Skipping...')
             all_project_data[project_path.name] = project_data
 
         if n is not None and i >= n:
@@ -265,15 +225,15 @@ def collate_metrics(metrics_list: List[Dict[str, float]]) -> Dict[str, float]:
     return collated_metrics
 
 
-def run_eval(
-        args: Namespace,
-        finetune_args: Namespace):
+def run_eval(cfg: Namespace):
     """Run evaluation steps for finetuning."""
 
+    eval_cfg = cfg.eval_cfg
+
     # Load data
-    print('Loading project data...')
-    primary_data = load_projects(FINETUNE_DATA_DIR, args.n_finetune_projects)
-    ood_data = load_projects(OOD_DATA_DIR, args.n_ood_projects)
+    logging.info('Loading project data...')
+    primary_data = load_projects(FINETUNE_DATA_DIR, eval_cfg.n_finetune_projects)
+    ood_data = load_projects(OOD_DATA_DIR, eval_cfg.n_ood_projects)
 
     # Flatten the ood_data
     all_ood_data = combine_project_data(ood_data)
@@ -282,7 +242,7 @@ def run_eval(
     primary_train_data = {}
     primary_test_data = {}
     for project_name, project_data in primary_data.items():
-        train_data, test_data = split_project_data(project_data, args.holdout_frac)
+        train_data, test_data = split_project_data(project_data, eval_cfg.holdout_frac)
         primary_train_data[project_name] = train_data
         primary_test_data[project_name] = test_data
 
@@ -291,13 +251,15 @@ def run_eval(
     np.random.shuffle(finetune_order)
 
     # Preare the compute metrics function
-    tokenizer = modeling.GLOBAL_TOKENIZER
-    fim_token_id = tokenizer.vocab[finetune.FIM_HOLE_TOKEN]
+    mp = modeling.ModelProvider.get_instance()
+    tokenizer = mp.get_model_utils()['tokenizer']
+    fim_token_id = tokenizer.vocab[FIM_HOLE_TOKEN]
+
     metrics_fn = lambda eval_preds: compute_metrics(eval_preds, fim_token_id)
 
     # Train for an epoch on each primary project while periodically logging metrics
-    print('Starting training...')
-    for outer_epoch in range(args.total_epochs):
+    logging.info('Starting training...')
+    for outer_epoch in range(eval_cfg.total_epochs):
         for project_idx, project_name in enumerate(finetune_order):
 
             # Get the data for the current project we are finetuning on
@@ -330,37 +292,64 @@ def run_eval(
                 eval_datasets['previous_projects_holdout'] = seen_test_set
 
             train_args = dict(
-                project_data = curr_train_set,
-                eval_data = eval_datasets,
-                output_dir = args.local_model_dir,
-                num_train_epochs = args.epochs_per_project,
-                report_to = 'wandb' if args.wandb else 'none',
                 do_eval = True,
+                logging_first_step = True,
                 evaluation_strategy = 'epoch',
-                compute_metrics = metrics_fn,
-                metrics_collator = collate_metrics,
-                # Get rid of logits to save memory (the are BIG)
-                # preprocess_logits_for_metrics = lambda logits: logits.argmax(2),
+                output_dir = cfg.model_cfg.save_model_dir,
+                report_to = 'wandb' if cfg.get('wandb') else 'none'
             )
-            train_args = {**train_args, **vars(finetune_args)}
+
+            # Update args for HF Trainer
+            finetune_cfg = cfg.train_cfg.copy()
+            OmegaConf.set_struct(finetune_cfg, False)
+            finetune_cfg.update(train_args)
+            OmegaConf.set_struct(finetune_cfg, True)
 
             # Finetune on the current project
-            print(f'Training on project {project_name}...')
-            finetune.train_supervised_projectdir(**train_args)
+            logging.info(f'Training on project {project_name}...')
+            finetune.train_supervised_projectdir(
+                project_data = curr_train_set,
+                eval_data = eval_datasets,
+                compute_metrics = metrics_fn,
+                metrics_collator = collate_metrics,
+                train_cfg = finetune_cfg
+            )
+
+
+def configure_logging():
+    """Configure logging for the server."""
+    logger.setLevel(logging.INFO)
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setLevel(logging.INFO)
+    formatter = logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    # add log in the file
+    handler = logging.FileHandler("log.txt")
+    handler.setLevel(logging.INFO)
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+
+
+@hydra.main(version_base=None, config_path="../app/conf", config_name="eval")
+def main(cfg: DictConfig):
+    # Initialize logging and get config
+    configure_logging()
+    cfg = OmegaConf.create(cfg)
+    modeling.ModelProvider(cfg.model_cfg)
+    config.ConfigProvider.initialize(cfg)
+
+    # Set random seed
+    if cfg.get('seed') is not None:
+        random.seed(cfg.seed)
+        np.random.seed(cfg.seed)
+        torch.manual_seed(cfg.seed)
+
+    # Run eval
+    run_eval(cfg)
 
 
 if __name__ == '__main__':
-    generic_args, env_args, unknown_args = parse_args(env_prefixes=['FINETUNE_'])
-    testing_args = parse_testing_args(unknown_args)
-    args = Namespace(**{**vars(generic_args), **vars(testing_args)})
-
-    # Set random seed
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
-
-    # Load model
-    modeling.initialize_model(args.model_dir, args.local_model_dir, args)
-
-    # Finetune and evaluate
-    run_eval(args, env_args['finetune'])
+    main()

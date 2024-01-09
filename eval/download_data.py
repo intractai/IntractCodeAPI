@@ -202,6 +202,12 @@ def download_and_save_repo(
         os.path.join(output_dir, root_folder),
         os.path.join(output_dir, repo_name))
 
+    # Go back through the new files and delete any unallowed file types
+    for root, dirs, files in os.walk(os.path.join(output_dir, repo_name)):
+        for file in files:
+            if os.path.splitext(file)[1].lower() in UNALLOWED_FILE_TYPES:
+                os.remove(os.path.join(root, file))
+
 
 def save_repos(repos_data: List[Dict[str, Any]], output_dir: str, auth_token: str, **kwargs):
     """Saves a list of repositories to a specified directory.

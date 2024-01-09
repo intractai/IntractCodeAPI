@@ -1,9 +1,7 @@
 """FastAPI server for running code completion model as a service."""
 
 import logging
-import os
 import sys
-from typing import Dict
 
 import hydra
 import uvicorn
@@ -12,7 +10,6 @@ from fastapi import FastAPI
 
 sys.path.append('../')
 from src import modeling, config
-from src.arg_handling import parse_args
 from app.routers import generator, fine_tuner
 
 
