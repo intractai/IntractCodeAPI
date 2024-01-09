@@ -1,34 +1,41 @@
-from typing import Tuple
-from argparse import Namespace
-import os
 import abc
+from argparse import Namespace
+from concurrent.futures import CancelledError
 import logging
+import os
+import threading
+from typing import Tuple
 
-import torch
 import bitsandbytes as bnb
 from huggingface_hub import snapshot_download
-from transformers import AutoTokenizer, AutoModelForCausalLM
-from transformers import BitsAndBytesConfig
 from peft import (
     prepare_model_for_kbit_training,
     LoraConfig,
     get_peft_model
 )
-import threading
-from concurrent.futures import  CancelledError
+import torch
+from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import BitsAndBytesConfig
 
 
 logger = logging.getLogger(__name__)
 
 # Create a global variable to store the model
 GLOBAL_GENERATE_THREAD_ID = None
+GLOBAL_FINETUNE_THREAD_ID = None
 GLOBAL_MAIN_THREAD_ID = None
+
+EOT_TOKEN = "<|EOT|>"
+FIM_BEGIN_TOKEN = "<｜fim▁begin｜>" # 32016
+FIM_HOLE_TOKEN = "<｜fim▁hole｜>" # 32015
+FIM_END_TOKEN = "<｜fim▁end｜>" # 32017
 
 
 def thread_hook(*args):
     current_thread_id = threading.get_ident()
     if GLOBAL_GENERATE_THREAD_ID is not None \
         and current_thread_id != GLOBAL_GENERATE_THREAD_ID \
+        and current_thread_id != GLOBAL_FINETUNE_THREAD_ID \
         and current_thread_id != GLOBAL_MAIN_THREAD_ID:
         raise CancelledError("Cancelled by new request")
 
@@ -116,6 +123,7 @@ class StandardModelLoader(ModelLoader):
             os.environ.get('TOKENIZERS_PARALLELISM', 'true')
         tokenizer = AutoTokenizer.from_pretrained(model_dir)
         tokenizer.model_max_length = self._cfg.context_length
+        tokenizer.truncation_side = 'left'
 
         model = AutoModelForCausalLM.from_pretrained(
             model_dir, use_flash_attention_2=use_flash_attention,
@@ -128,6 +136,7 @@ class StandardModelLoader(ModelLoader):
         GLOBAL_MAIN_THREAD_ID = threading.get_ident()
 
         return model, {'tokenizer': tokenizer}
+
 
 class LoraModelLoader(ModelLoader):
 
@@ -153,6 +162,7 @@ class LoraModelLoader(ModelLoader):
 
         tokenizer = AutoTokenizer.from_pretrained(model_dir)
         tokenizer.model_max_length = self._cfg.context_length
+        tokenizer.truncation_side = 'left'
 
         model = AutoModelForCausalLM.from_pretrained(
             model_dir, use_flash_attention_2=use_flash_attention,
@@ -179,6 +189,7 @@ class LoraModelLoader(ModelLoader):
 
         return model, {'tokenizer': tokenizer}
 
+
 class QLoraModelLoader(ModelLoader):
 
     def load_model(self) -> Tuple[torch.nn.Module, dict]:
@@ -203,6 +214,7 @@ class QLoraModelLoader(ModelLoader):
 
         tokenizer = AutoTokenizer.from_pretrained(model_dir)
         tokenizer.model_max_length = self._cfg.context_length
+        tokenizer.truncation_side = 'left'
 
         bb_config = BitsAndBytesConfig(
                 load_in_4bit=self._cfg.bits == 4,
@@ -280,7 +292,6 @@ class ModelProvider:
     def update_model(self, model: torch.nn.Module):
         with self._lock:  # Acquire the lock for thread safety
             self._model = model
-
 
 def get_model():
     model_provider = ModelProvider.get_instance()

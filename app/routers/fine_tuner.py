@@ -34,20 +34,19 @@ def finetune_project(item: ProjectFinetuneData, cfg: Annotated[Namespace, Depend
             # Run the future and return the result
             result = job_thread.result()
     except CancelledError:
-        logger.info("Cancelled /generate execution by a new request.") 
-    return {"result": "Cancelled by new request"}    
+        logger.info("Cancelled /generate execution by a new request.")
 
     # finetune_args = env_args['finetune']
     # finetune.train_supervised_projectdir(
     #     item.project_dict, output_dir=local_model_dir,
     #     report_to='none', **vars(finetune_args))
 
-    # return {"result": "success"}
+    return {"result": "success"}
 
 
 def finetune_task(item: ProjectFinetuneData, cfg: Namespace):
     # Print the current thread id to show that it is different for each request
-    modeling.GLOBAL_GENERATE_THREAD_ID = threading.get_ident()
+    modeling.GLOBAL_FINETUNE_THREAD_ID = threading.get_ident()
 
     model_cfg = cfg.model_cfg
     train_cfg = cfg.train_cfg
