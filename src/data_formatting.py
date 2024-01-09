@@ -1,8 +1,9 @@
 """Data formatting utilities for model inference and training."""
 
 from argparse import Namespace
+import numpy as np
 import logging
-from typing import Optional
+from typing import Optional, Sequence
 
 from fastapi import APIRouter
 import torch
@@ -20,8 +21,129 @@ router = APIRouter()
 # target fraction of the context that should be prior context
 # (the rest is proceeding context)
 GEN_PRIOR_CONTEXT_FRAC = 0.8
-MAX_FP_LEN = 32 # Maximum tokens in file path
+MAX_FP_TOKENS = 32 # Maximum tokens in file path
+# Labels with -100 index are ignored in the loss calculation
+# HuggingFace... document this stuff please
+IGNORE_INDEX = -100
 
+
+# Adapted from https://github.com/EleutherAI/gpt-neox/blob/
+# FIM-clean/megatron/data/gpt2_dataset.py#L339
+def prepare_fim_train_input(
+        code_tokens: Sequence[int],
+        fp_tokens: Sequence[int],
+        tokenizer: PreTrainedTokenizer,
+        truncate: bool = True):
+    """
+    Prepare a single training example for FIM.
+
+    Args:
+        code_tokens (Sequence[int]): The tokenized code.
+        fp_tokens (Sequence[int]): The tokenized file path.
+        tokenizer (PreTrainedTokenizer): The tokenizer.
+        truncate (bool, optional):
+            Whether or not to truncate the input. Defaults to True.
+
+    Returns:
+        Dict[str, Any]: The formatted training example.
+    """
+
+    if truncate:
+        # -6 is for -3 FIM special tokens, BOS, EOS, and 1 for extra space
+        code_tokens = code_tokens[:tokenizer.model_max_length - len(fp_tokens) - 6]
+
+    contents = tokenizer.decode(code_tokens, skip_special_tokens=False)
+
+    try:
+        # A boundary can be = 0 (prefix will be empty)
+        # a boundary can be = len(contents) (suffix will be empty)
+        # The two boundaries can be equal (middle will be empty)
+        boundaries = list(np.random.randint(low=0, high=len(contents) + 1, size=2))
+        boundaries.sort()
+    except ValueError as e:
+        print(len(contents), contents)
+        print(e)
+        raise e
+
+    prefix = contents[:boundaries[0]]
+    middle = contents[boundaries[0]:boundaries[1]]
+    suffix = contents[boundaries[1]:]
+
+    prefix = np.array(tokenizer.encode(prefix, add_special_tokens=False), dtype=np.int64)
+    middle = np.array(tokenizer.encode(middle, add_special_tokens=False), dtype=np.int64)
+    suffix = np.array(tokenizer.encode(suffix, add_special_tokens=False), dtype=np.int64)
+    fp_tokens = np.array(fp_tokens, dtype=np.int64)
+
+    prefix_tok_id = tokenizer.vocab[FIM_BEGIN_TOKEN]
+    middle_tok_id = tokenizer.vocab[FIM_HOLE_TOKEN]
+    suffix_tok_id = tokenizer.vocab[FIM_END_TOKEN]
+
+    # Here we truncate each given segment to fit the same length as it was before
+    # A consequence is that we never reach the end of a file?
+    # we should rather truncate at the context-level
+    if truncate:
+        # need to make same length as the input. Take the 3 sentinel tokens into account
+        new_length = suffix.shape[0] + fp_tokens.shape[0] + prefix.shape[0] + middle.shape[0] + 3
+        diff = new_length - tokenizer.model_max_length
+        if diff > 0: # too long
+            # If there's no space to truncate the suffix:
+            # stop and report it. atm i should have stopped this from happening
+            if suffix.shape[0] <= diff:
+                return None
+            suffix = suffix[:suffix.shape[0] - diff]
+
+    input_ids = np.concatenate([
+        [tokenizer.bos_token_id],
+        [prefix_tok_id], fp_tokens, prefix,
+        [middle_tok_id], suffix,
+        [suffix_tok_id], middle,
+        [tokenizer.eos_token_id]
+    ])
+
+    # Ignore the prompt tokens when calculating loss
+    labels = np.concatenate([
+        [IGNORE_INDEX],
+        [IGNORE_INDEX] * (len(fp_tokens) + len(prefix) + 1),
+        [IGNORE_INDEX] * (len(suffix) + 1),
+        [IGNORE_INDEX], middle,
+        [tokenizer.eos_token_id]
+    ])
+
+    return dict(
+        input_ids=input_ids,
+        labels=labels
+    )
+
+def prepare_ntp_train_input(
+        code_tokens: Sequence[int],
+        fp_tokens: Sequence[int],
+        tokenizer: PreTrainedTokenizer):
+    """
+    Prepare a single training example for next token prediction.
+
+    Args:
+        code_tokens (Sequence[int]): The tokenized code.
+        fp_tokens (Sequence[int]): The tokenized file path.
+        tokenizer (PreTrainedTokenizer): The tokenizer.
+
+    Returns:
+        Dict[str, Any]: The formatted training example.
+    """
+    input_ids = [tokenizer.bos_token_id] + \
+        fp_tokens + \
+        code_tokens + \
+        [tokenizer.eos_token_id]
+
+    labels = [IGNORE_INDEX] + \
+        len(fp_tokens) * [IGNORE_INDEX] + \
+        code_tokens + \
+        [IGNORE_INDEX]
+
+
+    return dict(
+        input_ids=input_ids,
+        labels=labels
+    )
 
 def format_ntp_inference_input(
         text: str,
@@ -46,7 +168,7 @@ def format_ntp_inference_input(
         return_tensors='pt',
         add_special_tokens=False,
         truncation=True,
-        max_length=MAX_FP_LEN,
+        max_length=MAX_FP_TOKENS,
     )[0]
 
     max_context_length = \
@@ -98,7 +220,7 @@ def format_fim_inference_input(
         return_tensors='pt',
         add_special_tokens=False,
         truncation=True,
-        max_length=MAX_FP_LEN,
+        max_length=MAX_FP_TOKENS,
     )[0]
     prefix = tokenizer.encode(
         preceeding_text,

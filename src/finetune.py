@@ -1,5 +1,4 @@
 from dataclasses import dataclass, field
-import os
 from typing import Any, Optional, Dict, Sequence
 import warnings
 
@@ -10,6 +9,11 @@ import torch.distributed
 import transformers
 
 from src import modeling
+from src.data_formatting import (
+    prepare_fim_train_input,
+    prepare_ntp_train_input,
+    MAX_FP_TOKENS
+)
 from src.trainer import ContinualTrainer
 
 
@@ -17,19 +21,8 @@ from src.trainer import ContinualTrainer
 # HuggingFace... document this stuff please
 IGNORE_INDEX = -100
 
-EOT_TOKEN = "<|EOT|>"
-FIM_BEGIN_TOKEN = "<｜fim▁begin｜>" # 32016
-FIM_HOLE_TOKEN = "<｜fim▁hole｜>" # 32015
-FIM_END_TOKEN = "<｜fim▁end｜>" # 32017
-
-EOT_ID = None
-FIM_BEGIN_ID = None
-FIM_HOLE_ID = None
-FIM_END_ID = None
-
 CHUNK_OVERLAP_FRAC = 0.1 # Fraction of chunk to overlap with previous chunk
                          # When splitting a document into chunks for finetuning
-RESERVED_TOKENS = 32 # Number of tokens reserved for file path and code insertion tokens
 FIM_RATE = 1 # Probability of performing FIM on a code chunk
 
 
@@ -61,7 +54,7 @@ def prepare_code_files(elements: Dict[str, Any], tokenizer, max_length=None) -> 
     file_path_text = [f"# {fp}\n" for fp in elements['file_path']]
     file_path_tokens = tokenizer(
             file_path_text,
-            max_length=RESERVED_TOKENS,
+            max_length=MAX_FP_TOKENS,
             truncation=True,
             add_special_tokens=False,
         )
@@ -78,72 +71,6 @@ def prepare_code_files(elements: Dict[str, Any], tokenizer, max_length=None) -> 
     )
 
 
-# Adapted from https://github.com/EleutherAI/gpt-neox/blob/
-# FIM-clean/megatron/data/gpt2_dataset.py#L339
-def make_fim_example(code_tokens, fp_tokens, tokenizer, truncate=True):
-    """
-    Take in a sample (np array w/ size (0,chunklength)) and perform a FIM transformation on it. 
-    Maintain the same sample length (if transform creates a few extra tokens, drop them).
-    """
-
-    contents = tokenizer.decode(code_tokens, skip_special_tokens=False)
-
-    try:
-        # A boundary can be = 0 (prefix will be empty)
-        # a boundary can be = len(contents) (suffix will be empty)
-        # The two boundaries can be equal (middle will be empty)
-        boundaries = list(np.random.randint(low=0, high=len(contents) + 1, size=2))
-        boundaries.sort()
-    except ValueError as e:
-        print(len(contents), contents)
-        print(e)
-        raise e
-
-    prefix = contents[:boundaries[0]]
-    middle = contents[boundaries[0]:boundaries[1]]
-    suffix = contents[boundaries[1]:]
-
-    prefix = np.array(tokenizer.encode(prefix, add_special_tokens=False), dtype=np.int64)
-    middle = np.array(tokenizer.encode(middle, add_special_tokens=False), dtype=np.int64)
-    suffix = np.array(tokenizer.encode(suffix, add_special_tokens=False), dtype=np.int64)
-
-    prefix_tok_id = tokenizer.vocab[FIM_BEGIN_TOKEN]
-    middle_tok_id = tokenizer.vocab[FIM_HOLE_TOKEN]
-    suffix_tok_id = tokenizer.vocab[FIM_END_TOKEN]
-
-    # Here we truncate each given segment to fit the same length as it was before
-    # A consequence is that we never reach the end of a file?
-    # we should rather truncate at the context-level
-    if truncate:
-        # need to make same length as the input. Take the 3 sentinel tokens into account
-        new_length = suffix.shape[0] + prefix.shape[0] + middle.shape[0] + 3
-        diff = new_length - tokenizer.model_max_length
-        if diff > 0: # too long
-            # If there's no space to truncate the suffix:
-            # stop and report it. atm i should have stopped this from happening
-            if suffix.shape[0] <= diff:
-                return None
-            suffix = suffix[:suffix.shape[0] - diff]
-
-    input_ids = np.concatenate([
-        [prefix_tok_id], fp_tokens, prefix,
-        [middle_tok_id], suffix,
-        [suffix_tok_id], middle
-    ])
-
-    # Ignore the prompt tokens when calculating loss
-    labels = np.concatenate([
-        [IGNORE_INDEX] * (len(fp_tokens) + len(prefix) + 1),
-        [IGNORE_INDEX] * (len(suffix) + 1),
-        [IGNORE_INDEX], middle
-    ])
-
-    return dict(
-        input_ids=input_ids,
-        labels=labels
-    )
-
-
 def prepare_train_dataset(elements: Dict[str, Any], tokenizer) -> Dict[str, Any]:
     """Convert code and file path tokens into training data"""
 
@@ -154,27 +81,20 @@ def prepare_train_dataset(elements: Dict[str, Any], tokenizer) -> Dict[str, Any]
     # First generate next token prediction training data
 
     for i in range(len(elements['code_tokens'])):
-        fp_tokens = elements['file_path_tokens'][i]
         code_tokens = elements['code_tokens'][i]
-        input_ids.append(
-            [tokenizer.bos_token_id] + \
-            fp_tokens + \
-            code_tokens + \
-            [tokenizer.eos_token_id]
-        )
-        labels.append(
-            [IGNORE_INDEX] + \
-            len(fp_tokens) * [IGNORE_INDEX] + \
-            code_tokens + \
-            [IGNORE_INDEX]
-        )
+        fp_tokens = elements['file_path_tokens'][i]
+
+        sample = prepare_ntp_train_input(code_tokens, fp_tokens, tokenizer)
+
+        input_ids.append(sample['input_ids'])
+        labels.append(sample['labels'])
         sample_types.append('ntp')
 
     # Then generate fill in the blank training data
 
     for i in range(len(elements['code_tokens'])):
         if np.random.binomial(1, FIM_RATE):
-            fim_sample = make_fim_example(code_tokens, fp_tokens, tokenizer)
+            fim_sample = prepare_fim_train_input(code_tokens, fp_tokens, tokenizer)
             if fim_sample is None:
                 warnings.warn("FIM sample was too long, skipping")
             else:
@@ -196,7 +116,8 @@ def project_to_dataset(
 
     raw_dataset = prepare_raw_dataset(project_data)
 
-    chunk_size = tokenizer.model_max_length - RESERVED_TOKENS
+    # -1 for for BOS token
+    chunk_size = tokenizer.model_max_length - MAX_FP_TOKENS - 1
     code_dataset = raw_dataset.map(
         prepare_code_files,
         batched=True,
