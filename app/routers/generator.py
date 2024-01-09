@@ -46,7 +46,7 @@ def generate(item: GenerateData, cfg: Annotated[Namespace, Depends(config.get_co
             result = job_thread.result()
     except CancelledError:
         print("Canceled generation!")
-        logger.info("Cancelled /generate execution by a new request.") 
+        logger.info("Cancelled /generate execution by a new request.")
         result = {"error": "Cancelled by new request"}
     return result
 

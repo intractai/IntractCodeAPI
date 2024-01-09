@@ -52,7 +52,7 @@ def main(cfg: DictConfig):
     app.include_router(generator.router)
     app.include_router(fine_tuner.router)
     uvicorn.run(app, **cfg.server_cfg)
-    
-    
+
+
 if __name__ == '__main__':
     main()
