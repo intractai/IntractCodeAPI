@@ -11,7 +11,7 @@ def send_request(port=8000):
     for path in Path(__file__).parent.parent.glob("misc/*.py"):
         if path.is_file():
             with open(path, "r", encoding="utf-8") as f:
-                project_dict[path.name] = "hello"
+                project_dict[path.name] = f.read()
 
     response = requests.post(
         f"http://localhost:{port}/finetune/project",
