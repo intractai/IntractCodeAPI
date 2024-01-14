@@ -1,16 +1,12 @@
+from unittest.mock import Mock, patch
+from typing import Tuple
+
+from fastapi.testclient import TestClient
 import pytest
 import transformers
 import torch
-from unittest.mock import Mock, patch
+from hydra import initialize, compose
 
 
-@pytest.fixture
-def mock_hf_model():
-    model = Mock()
-    model.predict.return_value = 'mocked prediction'
-    return model
-
-
-@patch('transformers.PreTrainedModel', new_callable=lambda: mock_hf_model)
-def test_generator(mock_model):
+def test_generator(test_client: TestClient):
     assert True == True

@@ -257,9 +257,19 @@ class ModelProvider:
             raise Exception("This class is a singleton!")
         else:
             ModelProvider._instance = self
-        # Initialize the model here
-        self._model, self._model_utils = \
-            self._model_loaders[cfg.model_type](cfg).load_model()
+            self._model, self._model_utils = self._load_model(cfg)
+        
+    def _load_model(self, cfg: dict):
+        model_type = cfg.get('model_type', 'standard')
+        model_loader_class = self._model_loaders.get(model_type)
+        if model_loader_class is None:
+            raise ValueError(f"Model type '{model_type}' is not supported.")
+        model_loader = model_loader_class(cfg)
+        return model_loader.load_model()
+
+    @classmethod
+    def register_model_loader(cls, key: str, loader_class):
+        cls._model_loaders[key] = loader_class
 
     def get_model(self):
         return self._model
@@ -268,7 +278,7 @@ class ModelProvider:
         return self._model_utils
     
     def update_model(self, model: torch.nn.Module):
-        with self._lock:  # Acquire the lock for thread safety
+        with self._lock:  
             self._model = model
 
 
