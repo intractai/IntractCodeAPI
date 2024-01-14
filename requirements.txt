@@ -13,3 +13,4 @@ pytest
 hydra-core
 omegaconf
 mock
+httpx
