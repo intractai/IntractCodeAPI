@@ -93,7 +93,13 @@ def prepare_train_dataset(elements: Dict[str, Any], tokenizer) -> Dict[str, Any]
     # Then generate fill in the blank training data
 
     for i in range(len(elements['code_tokens'])):
-        if np.random.binomial(1, FIM_RATE):
+        if FIM_RATE > 1:
+            do_extra_fim = np.random.binomial(1, FIM_RATE - int(FIM_RATE))
+            n_samples = int(FIM_RATE) + do_extra_fim
+        else:
+            n_samples = np.random.binomial(1, FIM_RATE)
+
+        for _ in range(n_samples):
             fim_sample = prepare_fim_train_input(code_tokens, fp_tokens, tokenizer)
             if fim_sample is None:
                 warnings.warn("FIM sample was too long, skipping")

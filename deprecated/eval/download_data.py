@@ -56,7 +56,7 @@ def parse_args():
                         help='Minimum date for repositories to pull from.')
     parser.add_argument('--max_repo_size', type=int, default=1000,
                         help='Maximum size of repository in kilobytes.')
-    parser.add_argument('--min_true_size', type=int, default=10,
+    parser.add_argument('--min_true_size', type=int, default=1,
                         help='Minimum size of repository in kilobytes post processing.')
     parser.add_argument('--min_true_files', type=int, default=5,
                         help='Minimum number of files after post processing.')
@@ -184,15 +184,6 @@ def download_and_save_repo(
     # Save to output directory under project name
     repo_name = repo_name or os.path.splitext(os.path.basename(repo_url))[0]
 
-    # Check for min number of files and min size
-    too_few_files = min_true_files and len(z.filelist) < min_true_files
-    too_small_size = min_true_size and \
-        sum([file.file_size for file in z.filelist]) < min_true_size * 1024
-
-    if too_few_files or too_small_size:
-        print(f'Skipping {repo_name} due to too few files or too small size.')
-        return
-
     # Save to output directory under project name
     z.extractall(output_dir)
 
@@ -203,11 +194,25 @@ def download_and_save_repo(
         os.path.join(output_dir, repo_name))
 
     # Go back through the new files and delete any unallowed file types
+    num_files = 0
+    total_size = 0
     for root, dirs, files in os.walk(os.path.join(output_dir, repo_name)):
         for file in files:
             if os.path.splitext(file)[1].lower() in UNALLOWED_FILE_TYPES:
                 os.remove(os.path.join(root, file))
+            else:
+                num_files += 1
+                total_size += os.path.getsize(os.path.join(root, file))
 
+    
+    # Check for min number of files and min size
+    too_few_files = min_true_files and num_files < min_true_files
+    too_small_size = min_true_size and total_size < min_true_size * 1024
+
+    if too_few_files or too_small_size:
+        shutil.rmtree(os.path.join(output_dir, repo_name))
+        print(f'Skipping {repo_name} due to too few files or too small size.')
+        return
 
 def save_repos(repos_data: List[Dict[str, Any]], output_dir: str, auth_token: str, **kwargs):
     """Saves a list of repositories to a specified directory.

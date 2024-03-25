@@ -92,14 +92,23 @@ def generate_task(item: GenerateData, cfg: Namespace):
     outputs = model.generate(
         **inputs, max_new_tokens=item.max_decode_length,
         return_dict_in_generate=True, output_scores=True,
-        do_sample=True, temperature=1.0, top_k=10, top_p=0.5)
+        do_sample=True, temperature=1.1, top_k=3)
 
     out_tokens = outputs.sequences[0][inputs.input_ids.shape[1]:]
-    output_text = tokenizer.decode(out_tokens, skip_special_tokens=True)
 
     # Calculate score of sequence (avg probability of the tokens)
     transition_scores = model.compute_transition_scores(
         outputs.sequences, outputs.scores, normalize_logits=True,
     )
-    score = torch.exp(transition_scores).mean().item()
+    transition_scores = torch.exp(transition_scores[0])
+
+    for i, s in enumerate(transition_scores):
+        if s < 0.1:
+            out_tokens = out_tokens[:i]
+            transition_scores = transition_scores[:i]
+            break
+
+    output_text = tokenizer.decode(out_tokens, skip_special_tokens=True)
+    score = transition_scores.mean().item()
+
     return {"generated_text": output_text, "score": score}

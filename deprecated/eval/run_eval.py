@@ -243,11 +243,14 @@ def run_eval(cfg: Namespace):
     primary_test_data = {}
     for project_name, project_data in primary_data.items():
         train_data, test_data = split_project_data(project_data, eval_cfg.holdout_frac)
+        if len(train_data) == 0 or len(test_data) == 0:
+            logging.warning(f'Project {project_name} has no data. Skipping...')
+            continue
         primary_train_data[project_name] = train_data
         primary_test_data[project_name] = test_data
 
     # Determine project training order for `finetune_data`
-    finetune_order = list(primary_data.keys())
+    finetune_order = list(primary_train_data.keys())
     np.random.shuffle(finetune_order)
 
     # Preare the compute metrics function

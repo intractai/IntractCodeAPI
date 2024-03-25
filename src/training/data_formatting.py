@@ -58,8 +58,18 @@ def prepare_fim_train_input(
         # A boundary can be = 0 (prefix will be empty)
         # a boundary can be = len(contents) (suffix will be empty)
         # The two boundaries can be equal (middle will be empty)
-        boundaries = list(np.random.randint(low=0, high=len(contents) + 1, size=2))
-        boundaries.sort()
+        # boundaries = list(np.random.randint(low=0, high=len(contents) + 1, size=2))
+        # boundaries.sort()
+
+        start = np.random.randint(low=0, high=len(contents))
+        mode_len = 32
+        max_len = 192
+        end = int(np.random.triangular(
+            start + 1,
+            start + mode_len,
+            max(min(len(contents), max_len), start + mode_len)))
+        boundaries = [start, end]
+
     except ValueError as e:
         print(len(contents), contents)
         print(e)
