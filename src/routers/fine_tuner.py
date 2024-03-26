@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, CancelledError
 
 from src import config, modeling
 from src.training import finetune
+from src.training.interactive.train_multi_step_sft import train_multi_step_sft_with_verification
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -36,7 +37,7 @@ def finetune_project(item: ProjectFinetuneData, cfg: Annotated[Namespace, Depend
     #     item.project_dict, output_dir=local_model_dir,
     #     report_to='none', **vars(finetune_args))
 
-    return {"result": "success"}
+    return {'result': 'success'}
 
 
 def get_documentation_data(
@@ -85,8 +86,11 @@ def get_documentation_data(
 def finetune_task(item: ProjectFinetuneData, cfg: Namespace):
     # Print the current thread id to show that it is different for each request
     modeling.GLOBAL_FINETUNE_THREAD_ID = threading.get_ident()
-    model = cfg.model
-    trainer_cfg = cfg.train.trainer
+    model_cfg = cfg.model
+
+    model_provider = modeling.ModelProvider.get_instance()
+    tokenizer = model_provider.get_model_utils()['tokenizer']
+    model = model_provider.get_model()
 
     # Determine what data to collect / generate
     require_problems = cfg.train.train_on_practice_problems \
@@ -114,8 +118,8 @@ def finetune_task(item: ProjectFinetuneData, cfg: Namespace):
     if cfg.train.train_on_code:
         logger.info("Training on user's codebase")
         finetune.train_self_supervised_project(
-            item.project_dict, output_dir=model.save_model_dir,
-            report_to='none', train_cfg=trainer_cfg, train_methods=train_methods, # TODO: Test train_methods
+            item.project_dict, output_dir=model_cfg.save_model_dir,
+            report_to='none', train_cfg=cfg.train, train_methods=train_methods, # TODO: Test train_methods
         )
         
     # Train on the collected documentation
@@ -134,8 +138,8 @@ def finetune_task(item: ProjectFinetuneData, cfg: Namespace):
 
         logger.info("Training on documentation text")
         finetune.train_self_supervised( # TODO: Test train_self_supervised
-            model, train_documents, output_dir=model.save_model_dir,
-            report_to='none', train_cfg=cfg.train.trainer, train_methods=['ntp'])
+            model, tokenizer, train_documents, output_dir=model_cfg.save_model_dir,
+            report_to='none', config=cfg.train, train_methods=['ntp'])
             
     # Train on the documentation code snippets
     if cfg.train.train_on_doc_code:
@@ -145,8 +149,8 @@ def finetune_task(item: ProjectFinetuneData, cfg: Namespace):
 
         logger.info("Training on documentation code snippets")
         finetune.train_self_supervised(
-            model, train_code, output_dir=model.save_model_dir,
-            report_to='none', train_cfg=cfg.train.trainer, train_methods=train_methods)
+            model, tokenizer, train_code, output_dir=model_cfg.save_model_dir,
+            report_to='none', config=cfg.train, train_methods=train_methods)
             
     # Generate practice problems and ideal solutions
     if require_problems:
@@ -154,22 +158,25 @@ def finetune_task(item: ProjectFinetuneData, cfg: Namespace):
         for library, lib_data in lib_data.items():
             train_problems.extend(lib_data['problems'])
 
+        # Can later also add a 'code' field to provide starting code
+        train_problems = {'instruction': train_problems}
+
         if cfg.train.train_on_practice_problems:
             logger.info("Training on practice problems")
-            solutions = interactive.multi_step_sft.train_sft_with_verification( # TODO: Add train_sft_with_verification
-                model, train_problems, output_dir=model.save_model_dir,
-                report_to='none', train_cfg=cfg.train.trainer)
+            solutions = train_multi_step_sft_with_verification( # TODO: Test train_sft_with_verification, make sure returned solutions are correct
+                model, tokenizer, train_problems, output_dir=model_cfg.save_model_dir,
+                report_to='none', config=cfg.train)
         else:
             logger.info("Generating solutions to practice problems")
             solutions = interactive.multi_step.generate_solutions( # TODO: Add generate_solutions
-                model, train_problems, output_dir=model.save_model_dir,
-                report_to='none', train_cfg=cfg.train.trainer)
+                model, tokenizer, train_problems, output_dir=model_cfg.save_model_dir,
+                report_to='none', config=cfg.train)
         
         # Train on the verified solutions
         if cfg.train.train_on_verified_solutions:
             finetune.train_self_supervised(
                 model, solutions, output_dir=model.save_model_dir,
-                report_to='none', train_cfg=cfg.train.trainer, train_methods=train_methods)
+                report_to='none', config=cfg.train, train_methods=train_methods)
 
 
     return {"result": "success"}

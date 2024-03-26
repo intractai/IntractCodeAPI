@@ -1,0 +1,38 @@
+defaults:
+  - multi_step_sft_config
+
+# seed: 0
+
+data:
+  dataset_name_or_path: "iamtarun/python_code_instructions_18k_alpaca"
+  split: "train[:40%]"
+
+
+model:
+  model_name: ${oc.env:MODEL_NAME, deepseek-ai/deepseek-coder-1.3b-instruct}
+  context_length: 1536
+  save_dir: "saved_models/multi_step/"
+  load_from_checkpoint: False
+
+
+train:
+  batch_size: 48 # per device
+  generation_batch_size: 48 # per device
+  max_revision_steps: 2 # Number of times an agent is allowed to revise the code, 1 = single turn
+  execution_timeout: 10 # Time limit for code execution in seconds
+  execution_length_limit: 400 # 1000 # Character limit for code execution output
+  max_gen_length: 512 # Maximum length of generated code
+  conda_env: "agent_env"
+  sample_log_frac: 0.01 # Fraction of samples to log
+
+  # Args for the HuggingFace trainer
+  trainer_kwargs:
+    output_dir: "train_logs/multi_step/"
+    per_device_train_batch_size: 4
+    logging_strategy: steps
+    logging_steps: 20
+    save_steps: 50
+    gradient_accumulation_steps: 8
+    eval_accumulation_steps: 4
+    max_steps: 675 # Number of train steps, should be ~3 epochs
+    gradient_checkpointing: True

@@ -5,17 +5,19 @@ import warnings
 
 from datasets import Dataset
 import numpy as np
+from omegaconf import DictConfig
 import torch
 import torch.distributed
 import transformers
+from transformers import PreTrainedModel, PreTrainedTokenizer
 
 from src import modeling
-from src.data_formatting import (
+from src.training.data_formatting import (
     prepare_fim_train_input,
     prepare_ntp_train_input,
     MAX_FP_TOKENS
 )
-from src.trainer import ContinualTrainer
+from src.training.trainer import ContinualTrainer
 
 
 logger = logging.getLogger(__name__)
@@ -294,9 +296,10 @@ class DataCollatorForSupervisedDataset(object):
 
 
 def train_self_supervised(
+        model: PreTrainedModel, tokenizer: PreTrainedTokenizer,
         train_dataset: Dataset, eval_datasets: Optional[Dict[str, Dataset]] = None,
         compute_metrics = None, metrics_collator: Callable = None,
-        train_cfg: dict = None, **kwargs,
+        config: DictConfig = None, **kwargs,
     ):
     """Train a model in a self-supervised manner given a dataset.
 
@@ -304,25 +307,20 @@ def train_self_supervised(
     The dataset is expected to be fully formatted and ready for training.
     
     Args:
+        model (PreTrainedModel): The model to train.
+        tokenizer (PreTrainedTokenizer): The tokenizer to use.
         train_dataset (Dataset): The dataset to train on.
         eval_datasets (Dict[str, Dataset]): The datasets to evaluate on.
         compute_metrics (Callable): The function to compute metrics.
         metrics_collator (Callable): The function to collate metrics.
-        train_cfg (dict): The training configuration.
+        config (dict): The training configuration.
         **kwargs: Additional arguments passed to trainer args.
     """
-    model_provider = modeling.ModelProvider.get_instance()
-
     parser = transformers.HfArgumentParser((TrainingArguments))
-    training_args = parser.parse_dict({**train_cfg, **kwargs})[0]
+    training_args = parser.parse_dict({**config.trainer, **kwargs})[0]
 
     if training_args.local_rank == 0:
         logger.debug("Train args:\n" + str(training_args))
-
-    tokenizer = model_provider.get_model_utils()['tokenizer']
-
-    # Store reference to the model and tokenizer in the model module
-    model = model_provider.get_model()
 
     data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer)
     data_module = dict(
@@ -337,13 +335,13 @@ def train_self_supervised(
         args = training_args,
         compute_metrics = compute_metrics,
         metrics_collator = metrics_collator,
-        **data_module
+        **data_module,
     )
 
     trainer.train()
-    model_provider.update_model(trainer.model)
 
     # Release all the memory used by the trainer
+    # Had some memory leak issues and this maybe solved it?
     trainer.model = None
     trainer.tokenizer = None
     trainer.optimizer = None
@@ -356,8 +354,9 @@ def train_self_supervised(
 
 
 def train_self_supervised_documents(
+        model: PreTrainedModel, tokenizer: PreTrainedTokenizer,
         documents: List[str], eval_data: Optional[List[str]] = None,
-        compute_metrics = None, metrics_collator: Callable = None, train_cfg: dict = None,
+        compute_metrics = None, metrics_collator: Callable = None, config: DictConfig = None,
         train_methods: Optional[List[str]] = None, **kwargs,
     ):
     """Train a model in a self-supervised manner given a list of strings.
@@ -368,9 +367,6 @@ def train_self_supervised_documents(
         documents (List[str]): The documents to train on.
         eval_data (List[str]): The evaluation data.
     """
-    model_provider = modeling.ModelProvider.get_instance()
-    tokenizer = model_provider.get_model_utils()['tokenizer']
-
     train_dataset = documents_to_dataset(documents, tokenizer, train_methods)
 
     if eval_data is None:
@@ -381,14 +377,15 @@ def train_self_supervised_documents(
             eval_datasets[dataset_name] = documents_to_dataset(data, tokenizer, train_methods)
 
     train_self_supervised(
-        train_dataset, eval_datasets, compute_metrics, metrics_collator,
-        train_cfg, **kwargs
+        model, tokenizer, train_dataset, eval_datasets, compute_metrics,
+        metrics_collator, config, **kwargs
     )
 
 
 def train_self_supervised_project(
+        model: PreTrainedModel, tokenizer: PreTrainedTokenizer,
         project_data, eval_data = None, compute_metrics = None,
-        metrics_collator: Callable = None, train_cfg: dict = None,
+        metrics_collator: Callable = None, config: DictConfig = None,
         train_methods: Optional[List[str]] = None, **kwargs,
     ):
     """Train a model in a self-supervised manner given a dataset.
@@ -401,9 +398,6 @@ def train_self_supervised_project(
     """
     # Eval data must be in format {name_of_dataset: {file_name: file_contents, ...}},
     # even if only one eval dataset
-    model_provider = modeling.ModelProvider.get_instance()
-    tokenizer = model_provider.get_model_utils()['tokenizer']
-
     train_dataset = project_to_dataset(project_data, tokenizer, train_methods)
 
     if eval_data is None:
@@ -414,6 +408,6 @@ def train_self_supervised_project(
             eval_datasets[dataset_name] = project_to_dataset(data, tokenizer, train_methods)
 
     train_self_supervised(
-        train_dataset, eval_datasets, compute_metrics, metrics_collator,
-        train_cfg, **kwargs
+        model, tokenizer, train_dataset, eval_datasets, compute_metrics,
+        metrics_collator, config, **kwargs
     )

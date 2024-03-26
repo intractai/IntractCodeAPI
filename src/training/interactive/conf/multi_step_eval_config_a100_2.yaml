@@ -1,0 +1,18 @@
+defaults:
+  - multi_step_ssl_config_a100_2
+
+
+data:
+  split: "train[80%:]"
+
+
+model:
+  load_from_checkpoint: True
+
+
+train:
+  # Args for the HuggingFace trainer
+  trainer_kwargs:
+    logging_steps: 5
+    save_steps: -1
+    max_steps: 100 # Number of train steps, should be ~3 epochs
