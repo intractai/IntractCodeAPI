@@ -10,7 +10,7 @@ from transformers import PreTrainedTokenizer
 import torch
 
 from src import modeling, config
-from src.data_formatting import format_inference_input
+from src.training.data_formatting import format_inference_input
 
 
 logger = logging.getLogger(__name__)

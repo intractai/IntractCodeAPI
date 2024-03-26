@@ -43,12 +43,12 @@ def main(cfg: DictConfig):
 
     configure_logging()
     cfg = OmegaConf.create(cfg)
-    modeling.ModelProvider(cfg.model_cfg)
+    modeling.ModelProvider(cfg.model)
     config.ConfigProvider.initialize(cfg)
 
     app.include_router(generator.router)
     app.include_router(fine_tuner.router)
-    uvicorn.run(app, **cfg.server_cfg)
+    uvicorn.run(app, **cfg.server)
 
 
 if __name__ == '__main__':

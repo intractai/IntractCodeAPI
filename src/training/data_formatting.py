@@ -142,7 +142,7 @@ def prepare_ntp_train_input(
     input_ids = [tokenizer.bos_token_id] + \
         fp_tokens + \
         code_tokens + \
-        [tokenizer.eos_token_id]
+        [tokenizer.eos_token_id] # TODO: FIX THIS, EOS SHOULD BE PUT INTO CODE BEFORE IT IS CHUNKED
 
     labels = [IGNORE_INDEX] + \
         len(fp_tokens) * [IGNORE_INDEX] + \
@@ -182,7 +182,7 @@ def format_ntp_inference_input(
     )[0]
 
     max_context_length = \
-        cfg.model_cfg.context_length - len(fp_tokens) - max_decode_length
+        cfg.model.context_length - len(fp_tokens) - max_decode_length
     context_tokens = tokenizer.encode(
         text,
         return_tensors='pt',
@@ -192,7 +192,7 @@ def format_ntp_inference_input(
     )[0]
 
     input_ids = torch.cat([
-        torch.tensor([tokenizer.bos_token_id]),
+        torch.tensor([tokenizer.bos_token_id]), # TODO: FIX THIS, THERE SHOULDN'T ALWAYS BE A BOS TOKEN
         fp_tokens,
         context_tokens,
     ]).unsqueeze(0)
@@ -250,7 +250,7 @@ def format_fim_inference_input(
     # the max context length of the model
     # -4 is for the 4 FIM and BOS special tokens added to the prompt
     max_context_length = \
-        cfg.model_cfg.context_length - len(fp_tokens) - max_decode_length +  - 4
+        cfg.model.context_length - len(fp_tokens) - max_decode_length +  - 4
     raw_text_length = len(prefix) + len(suffix)
 
     # If the raw text is too long, truncate it

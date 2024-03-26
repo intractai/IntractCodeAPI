@@ -15,7 +15,7 @@ def train(args, finetune_args):
             with open(path, "r", encoding="utf-8") as f:
                 project_dict[path.name] = f.read()
     modeling.intialize_model(args.model_dir, args.local_model_dir, args)
-    finetune.train_supervised_projectdir(
+    finetune.train_self_supervised_project(
         project_dict,
         output_dir=args.local_model_dir,
         report_to='none',

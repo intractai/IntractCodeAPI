@@ -3,7 +3,7 @@ defaults:
 
 wandb: False
 
-model_cfg:
+model:
   save_model_dir: "app/saved_models/"
   model_dir: "app/.model/"
   model_name: ${oc.env:MODEL_NAME, deepseek-ai/deepseek-coder-1.3b-base} # 1.3b-instruct} # 5.7bmqa-base} # 6.7b-base}
@@ -13,13 +13,14 @@ model_cfg:
   device: cuda
   use_flash_attention: True
 
-train_cfg:
-  per_device_train_batch_size: 3
-  logging_steps: 8
-  logging_strategy: steps
-  optim: adamw_bnb_8bit
+train:
+  trainer:
+    per_device_train_batch_size: 3
+    logging_steps: 8
+    logging_strategy: steps
+    optim: adamw_bnb_8bit
 
-eval_cfg:
+eval:
   holdout_frac: 0.2
   total_epochs: 2
   epochs_per_project: 2

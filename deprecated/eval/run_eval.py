@@ -228,7 +228,7 @@ def collate_metrics(metrics_list: List[Dict[str, float]]) -> Dict[str, float]:
 def run_eval(cfg: Namespace):
     """Run evaluation steps for finetuning."""
 
-    eval_cfg = cfg.eval_cfg
+    eval_cfg = cfg.eval
 
     # Load data
     logging.info('Loading project data...')
@@ -298,19 +298,19 @@ def run_eval(cfg: Namespace):
                 do_eval = True,
                 logging_first_step = True,
                 evaluation_strategy = 'epoch',
-                output_dir = cfg.model_cfg.save_model_dir,
+                output_dir = cfg.model.save_model_dir,
                 report_to = 'wandb' if cfg.get('wandb') else 'none'
             )
 
             # Update args for HF Trainer
-            finetune_cfg = cfg.train_cfg.copy()
+            finetune_cfg = cfg.train.trainer.copy()
             OmegaConf.set_struct(finetune_cfg, False)
             finetune_cfg.update(train_args)
             OmegaConf.set_struct(finetune_cfg, True)
 
             # Finetune on the current project
             logging.info(f'Training on project {project_name}...')
-            finetune.train_supervised_projectdir(
+            finetune.train_self_supervised_project(
                 project_data = curr_train_set,
                 eval_data = eval_datasets,
                 compute_metrics = metrics_fn,
@@ -341,7 +341,7 @@ def main(cfg: DictConfig):
     # Initialize logging and get config
     configure_logging()
     cfg = OmegaConf.create(cfg)
-    modeling.ModelProvider(cfg.model_cfg)
+    modeling.ModelProvider(cfg.model)
     config.ConfigProvider.initialize(cfg)
 
     # Set random seed
