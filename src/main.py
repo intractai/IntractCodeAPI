@@ -10,7 +10,7 @@ from fastapi import FastAPI
 
 sys.path.append('../')
 from src import modeling, config
-from app.routers import generator, fine_tuner
+from src.routers import generator, fine_tuner
 
 
 logger = logging.getLogger(__name__)

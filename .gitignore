@@ -162,6 +162,7 @@ cython_debug/
 # Personal access tokens
 **.pat
 .download/
-app/.model/
+**/.model/
 **/wandb/
 deprecated/**/data/
+src/outputs/

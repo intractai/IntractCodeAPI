@@ -111,7 +111,10 @@ class StandardModelLoader(ModelLoader):
         use_flash_attention = self._determine_flash_attention()
 
         if use_flash_attention:
+            attn_implementation = 'flash_attention_2'
             logger.info('Using flash attention')
+        else:
+            attn_implementation = None
 
         # Ideally we should check all the files, but for now just check one
         model_dir = os.path.join(model_dir, model_name)
@@ -126,7 +129,7 @@ class StandardModelLoader(ModelLoader):
         tokenizer.truncation_side = 'left'
 
         model = AutoModelForCausalLM.from_pretrained(
-            model_dir, use_flash_attention_2=use_flash_attention,
+            model_dir, attn_implementation=attn_implementation,
             device_map=device, torch_dtype=dtype)
         model.to(device)
 

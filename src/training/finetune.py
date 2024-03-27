@@ -29,7 +29,7 @@ IGNORE_INDEX = -100
 CHUNK_OVERLAP_FRAC = 0.1 # Fraction of chunk to overlap with previous chunk
                          # When splitting a document into chunks for finetuning
 FIM_RATE = 1 # Probability of performing FIM on a code chunk
-DEFAULT_TRAIN_METHODS = ['ntp', 'fim']
+DEFAULT_TRAIN_METHODS = ['ntp']
 
 
 def prepare_raw_project_dataset(project_data: Dict[str, str]) -> Dataset:
@@ -296,10 +296,9 @@ class DataCollatorForSupervisedDataset(object):
 
 
 def train_self_supervised(
-        model: PreTrainedModel, tokenizer: PreTrainedTokenizer,
-        train_dataset: Dataset, eval_datasets: Optional[Dict[str, Dataset]] = None,
-        compute_metrics = None, metrics_collator: Callable = None,
-        config: DictConfig = None, **kwargs,
+        model: PreTrainedModel, tokenizer: PreTrainedTokenizer, train_dataset: Dataset,
+        config: DictConfig, eval_datasets: Optional[Dict[str, Dataset]] = None,
+        compute_metrics = None, metrics_collator: Callable = None, **kwargs,
     ):
     """Train a model in a self-supervised manner given a dataset.
 
@@ -323,11 +322,6 @@ def train_self_supervised(
         logger.debug("Train args:\n" + str(training_args))
 
     data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer)
-    data_module = dict(
-        train_dataset = train_dataset,
-        eval_dataset = eval_datasets,
-        data_collator = data_collator,
-    )
 
     trainer = ContinualTrainer(
         model = model,
@@ -335,7 +329,9 @@ def train_self_supervised(
         args = training_args,
         compute_metrics = compute_metrics,
         metrics_collator = metrics_collator,
-        **data_module,
+        train_dataset = train_dataset,
+        eval_dataset = eval_datasets,
+        data_collator = data_collator,
     )
 
     trainer.train()
@@ -355,17 +351,20 @@ def train_self_supervised(
 
 def train_self_supervised_documents(
         model: PreTrainedModel, tokenizer: PreTrainedTokenizer,
-        documents: List[str], eval_data: Optional[List[str]] = None,
-        compute_metrics = None, metrics_collator: Callable = None, config: DictConfig = None,
+        documents: List[str], config: DictConfig, eval_data: Optional[List[str]] = None,
+        compute_metrics = None, metrics_collator: Callable = None,
         train_methods: Optional[List[str]] = None, **kwargs,
     ):
     """Train a model in a self-supervised manner given a list of strings.
 
-    For arguments other than documents and eval_data, see train_self_supervised.
+    For arguments other than documents, eval_data, and train_methods, see train_self_supervised.
 
     Args:
         documents (List[str]): The documents to train on.
         eval_data (List[str]): The evaluation data.
+        train_methods (List[str]): The training methods to use.
+            'ntp' (next token prediction) and 'fim' (fill-in-the-middle) are available.
+            If None, only ntp is used.
     """
     train_dataset = documents_to_dataset(documents, tokenizer, train_methods)
 
@@ -377,24 +376,28 @@ def train_self_supervised_documents(
             eval_datasets[dataset_name] = documents_to_dataset(data, tokenizer, train_methods)
 
     train_self_supervised(
-        model, tokenizer, train_dataset, eval_datasets, compute_metrics,
-        metrics_collator, config, **kwargs
+        model, tokenizer, train_dataset, config, eval_datasets,
+        compute_metrics, metrics_collator, **kwargs
     )
 
 
 def train_self_supervised_project(
-        model: PreTrainedModel, tokenizer: PreTrainedTokenizer,
-        project_data, eval_data = None, compute_metrics = None,
-        metrics_collator: Callable = None, config: DictConfig = None,
-        train_methods: Optional[List[str]] = None, **kwargs,
+        model: PreTrainedModel, tokenizer: PreTrainedTokenizer, project_data,
+        config: DictConfig, eval_data = None, compute_metrics = None,
+        metrics_collator: Callable = None, train_methods: Optional[List[str]] = None,
+        **kwargs,
     ):
     """Train a model in a self-supervised manner given a dataset.
     
-    For arguments other than project_data and eval_data, see train_self_supervised.
+    For arguments other than project_data, eval_data, and train_methods,
+    see train_self_supervised.
 
     Args:
         project_data (Dict[str, str]): The project data to train on.
         eval_data (Dict[str, Dict[str, str]]): The evaluation data.
+        train_methods (List[str]): The training methods to use.
+            'ntp' (next token prediction) and 'fim' (fill-in-the-middle) are available.
+            If None, only ntp is used.
     """
     # Eval data must be in format {name_of_dataset: {file_name: file_contents, ...}},
     # even if only one eval dataset
@@ -408,6 +411,6 @@ def train_self_supervised_project(
             eval_datasets[dataset_name] = project_to_dataset(data, tokenizer, train_methods)
 
     train_self_supervised(
-        model, tokenizer, train_dataset, eval_datasets, compute_metrics,
-        metrics_collator, config, **kwargs
+        model, tokenizer, train_dataset, config, eval_datasets,
+        compute_metrics, metrics_collator, **kwargs
     )

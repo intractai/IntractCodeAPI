@@ -11,20 +11,6 @@ from trl import PreTrainedModelWrapper
 log = logging.getLogger(__name__)
 
 
-def dummy_validation_func(query: str, response: str, exec_output: str) -> bool:
-    """Dummy function for validating whether a response is correct.
-    
-    Returns True if the response is correct, False otherwise.
-
-    Args:
-        query (str): The query to the agent
-        response (str): The response from the agent
-        exec_output (str): The output of the executed code
-    """
-    # Randomly return torch true or false
-    return torch.rand(1) > 0.5
-
-
 def prepare_queries(
         tokenizer: PreTrainedTokenizer,
         instructions: List[str],

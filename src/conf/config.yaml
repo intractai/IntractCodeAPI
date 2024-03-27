@@ -31,6 +31,9 @@ model:
 train:
   max_gen_length: 128 # Maximum length of generated code
 
+  # Parameters for retrieving documentation and generating problems
+  max_retrieval_threads: 4
+
   # Parameters for multi-step SFT with verification
   max_query_length: 512 # Maximum length of input query for instruction fine-tuning
   max_revision_steps: 2 # Maximum number of revisions for instruction fine-tuning + 1
@@ -39,7 +42,7 @@ train:
   execution_timeout: 10 # Time limit for code execution in seconds
   execution_length_limit: 100 # Character limit for code execution output
   conda_env: "agent_env"
-  mask_prompt_labels: False # When prompt labels are masked, the model is trained to predict only responses
+  mask_prompt_labels: True # When prompt labels are masked, the model is trained to predict only responses
   sample_log_frac: 0.05 # Fraction of samples to log
 
   # What types of training to use

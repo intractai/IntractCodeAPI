@@ -13,13 +13,13 @@ from transformers import PreTrainedModel, PreTrainedTokenizer, TrainingArguments
 from trl import IterativeSFTTrainer
 import wandb
 
-from .helpers import (
+from src.training.interactive.helpers import (
     batch_execute_code_with_timeout,
     dummy_validation_func,
     extract_code,
     openai_validate_response,
 )
-from .multi_step import llm_generate_batched, prepare_queries
+from src.training.interactive.multi_step import llm_generate_batched, prepare_queries
 
 
 HEADER_DASHES = '-' * 30
@@ -183,7 +183,7 @@ def log_revision_metrics(revisions, config, tokenizer, step=None):
     ### Log samples ###
 
     # Decide how many samples to log, a fraction of the total number of problems
-    log_frac = config.train.get('sample_log_frac', 0)
+    log_frac = config.get('sample_log_frac', 0)
     n_log = np.random.binomial(n_problems, log_frac)
 
     if n_log > 0:
@@ -427,8 +427,8 @@ def prepare_problem_dataset_and_loader(
 def train_multi_step_sft_with_verification(
         model: PreTrainedModel,
         tokenizer: PreTrainedTokenizer,
-        config: DictConfig,
         train_data: Union[Dict[str, List[str]], List[str]], # instruction, code (optional)
+        config: DictConfig,
         **kwargs,
     ):
     """Train a model using the multi-step SFT algorithm with verification.
@@ -441,14 +441,17 @@ def train_multi_step_sft_with_verification(
             Must contain the 'instruction' field, and may contain the 'code' field.
         **kwargs: Additional keyword arguments to pass to the training loop.
     """
-    num_processes = torch.distributed.get_world_size()
+    if torch.distributed.is_initialized():
+        num_processes = torch.distributed.get_world_size()
+    else:
+        num_processes = 1
     
 
     ### Create the dataset ###
 
     batch_size = config.generation_batch_size * num_processes
     dataset, dataloader = prepare_problem_dataset_and_loader(train_data, batch_size)
-    log.info(f"Preparing dataset with {len(dataset)} samples")
+    log.info(f"Prepared dataset with {len(dataset)} samples")
 
 
     ### Initialize the SFT trainer ###
@@ -511,20 +514,23 @@ def train_multi_step_sft_with_verification(
 def generate_solutions(
         model: PreTrainedModel,
         tokenizer: PreTrainedTokenizer,
-        config: DictConfig,
         problem_data: Union[Dict[str, List[str]], List[str]], # instruction, code (optional)
+        config: DictConfig,
     ):
     """Train a model using the multi-step SFT algorithm with verification.
     
     Args:
         model (PreTrainedModel): The model to train.
         tokenizer (PreTrainedTokenizer): The tokenizer to use for encoding and decoding text.
-        config (DictConfig): The configuration object for the training run.
         problem_data (Union[Dict[str, List[str]], List[str]]): Problems to generate solutions for.
             Must contain the 'instruction' field, and may contain the 'code' field.
+        config (DictConfig): The configuration object for the training run.
         **kwargs: Additional keyword arguments to pass to the training loop.
     """
-    num_processes = torch.distributed.get_world_size()
+    if torch.distributed.is_initialized():
+        num_processes = torch.distributed.get_world_size()
+    else:
+        num_processes = 1
     
 
     ### Create the dataset ###
