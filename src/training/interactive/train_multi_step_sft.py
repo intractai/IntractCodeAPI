@@ -1,6 +1,6 @@
 import logging
 import math
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple, Union
 
 from accelerate import Accelerator
 from accelerate.utils import gather_object
@@ -29,7 +29,7 @@ log = logging.getLogger(__name__)
 
 
 def revise_batch(
-        config, batch, model, tokenizer, accelerator, trainer,
+        config, batch, model, tokenizer, accelerator,
         generation_kwargs, revision_idx,
     ) -> dict:
     """Perform a single revision step on a batch of data.
@@ -40,12 +40,11 @@ def revise_batch(
     be repeated.
     
     Args:
-        config: The configuration object for the training run.
+        config: The train config.
         batch: The batch of data to revise.
         model: The model to use for generating responses.
         tokenizer: The tokenizer to use for encoding and decoding text.
         accelerator: The accelerator to use for training.
-        trainer: The trainer object to use for training.
         generation_kwargs: The keyword arguments to use when generating responses.
         revision_idx: The index of the revision step.
 
@@ -71,8 +70,7 @@ def revise_batch(
             **generation_kwargs,
         )
     except torch.cuda.OutOfMemoryError:
-        print(f'Out of memory at step {trainer.state.global_step}. '
-               'No more revisions will be attempted this batch.')
+        log.info(f'Out of memory. No more revisions will be attempted this batch.')
         torch.cuda.empty_cache()
         return None
 
@@ -232,14 +230,14 @@ def log_revision_metrics(revisions, config, tokenizer, step=None):
     # wandb.log(metrics, step=step)
 
 
-def train_loop(
+def generate_and_train_loop(
         config: DictConfig,
         model: PreTrainedModel,
         tokenizer: PreTrainedTokenizer,
         dataloader: torch.utils.data.DataLoader,
-        trainer: IterativeSFTTrainer,
         accelerator: Accelerator,
         generation_kwargs: dict[str, Any],
+        trainer: IterativeSFTTrainer = None,
     ) -> Dict[int, str]:
     """Train the model using the multi-step SFT algorithm.
     
@@ -248,17 +246,23 @@ def train_loop(
     responses if they are incorrect. The loop continues until the maximum number of
     training steps or epochs is reached. The function returns a dictionary mapping
     problem IDs to their solutions. Not every problem will necessarily have a solution.
+
+    If trainer is None, then the model only generates solutions and does not train.
     """
 
     data_iterator = iter(dataloader)
     max_seq_len = config.max_query_length + config.max_gen_length
     solutions = {} # Maps problem id to solution
 
+    num_train_epochs = config.iterative_sft_trainer.num_train_epochs \
+        if trainer is None \
+        else trainer.args.num_train_epochs
+
     # Start the training loop
     epoch_idx = 0
-    while trainer.state.global_step < trainer.args.max_steps:
+    while trainer is None or trainer.state.global_step < trainer.args.max_steps:
 
-        ### Prepare a batch for training ###
+        ### Prepare a batch for generation ###
 
         try:
             batch = next(data_iterator)
@@ -266,7 +270,7 @@ def train_loop(
             log.info(f"Finished epoch {epoch_idx}")
             epoch_idx += 1
 
-            if epoch_idx >= trainer.args.num_train_epochs:
+            if epoch_idx >= num_train_epochs:
                 break
 
             data_iterator = iter(dataloader)
@@ -279,7 +283,7 @@ def train_loop(
         for revision_idx in range(config.max_revision_steps):
 
             revision_data = revise_batch(
-                config, batch, model, tokenizer, accelerator, trainer,
+                config, batch, model, tokenizer, accelerator,
                 generation_kwargs, revision_idx,
             )
 
@@ -294,12 +298,14 @@ def train_loop(
             if len(batch['instruction']) == 0:
                 break
 
+        
+        ### Calculate and log metrics ###
+        
+        if accelerator.is_main_process and trainer is not None:
+            log_revision_metrics(revisions, config, tokenizer, step=trainer.state.global_step)
 
-        ### Prepare the revision data for training ###
 
-        # Now we need to pull out the query and response training pairs form the revisions
-        train_query_tensors = []
-        train_gt_response_tensors = []
+        ### Gather correct solutions ###
 
         # First we need to find the correct solutions for each query
         correct_responses = {}
@@ -316,6 +322,17 @@ def train_loop(
                     solutions[problem_id] = tokenizer.decode(
                         revision_data['response_tensors'][i], skip_special_tokens=True)
         
+        # Stop here if not training
+        if trainer is None:
+            continue
+        
+
+        ### Prepare the revision data for training ###
+
+        # Now we need to pull out the query and response training pairs form the revisions
+        train_query_tensors = []
+        train_gt_response_tensors = []
+
         # Now we can use the correct responses as the ground-truth responses
         for revision_data in revisions:
             for i in range(len(revision_data['query_tensors'])):
@@ -323,12 +340,6 @@ def train_loop(
                 if original_idx in correct_responses:
                     train_query_tensors.append(revision_data['query_tensors'][i])
                     train_gt_response_tensors.append(correct_responses[original_idx])
-        
-            
-        ### Calculate and log metrics ###
-        
-        if accelerator.is_main_process:
-            log_revision_metrics(revisions, config, tokenizer, step=trainer.state.global_step)
 
 
         ### Transform gathered data into trainer format ###
@@ -343,7 +354,7 @@ def train_loop(
                      for q, r in zip(train_query_tensors, train_gt_response_tensors)]
         attention_masks = [torch.ones_like(x) for x in input_ids]
 
-        if config.train.mask_prompt_labels:
+        if config.mask_prompt_labels:
             labels = [torch.cat([torch.LongTensor([-100] * len(q)), r])[:max_seq_len] \
                         for q, r in zip(train_query_tensors, train_gt_response_tensors)]
         else:
@@ -372,17 +383,52 @@ def train_loop(
         del train_query_tensors
         del train_gt_response_tensors
 
-        if trainer.state.global_step >= trainer.args.max_steps:
-            break
-
     return solutions
+
+
+def prepare_problem_dataset_and_loader(
+        problem_data: Union[Dict[str, List[str]], List[str]],
+        batch_size: int,
+    ) -> Tuple[Dataset, DataLoader]:
+    """Prepare a dataset and dataloader for a problem dataset.
+    
+    Args:
+        problem_data (Union[Dict[str, List[str]], List[str]]): The problem data to prepare.
+            Must contain the 'instruction' field, and may contain the 'code' field.
+        batch_size (int): The batch size to use for the dataloader.
+        
+    Returns:
+        Tuple[Dataset, DataLoader]: The dataset and dataloader for the problem data.
+    """
+    if isinstance(problem_data, list):
+        problem_data = {'instruction': problem_data}
+
+    assert 'instruction' in problem_data, \
+        "The training data must contain 'instruction' field!"
+    
+    # Current implementation requires starting code, so just give blank code if not provided
+    if 'code' not in problem_data:
+        problem_data['code'] = [''] * len(problem_data['instruction'])
+
+    # Give each problem an index to make it easy to match problems to solutions later
+    problem_data['problem_id'] = list(range(len(problem_data['instruction'])))
+    dataset = Dataset.from_dict(problem_data)
+
+    dataloader = DataLoader(
+        dataset,
+        batch_size = batch_size,
+        shuffle = True,
+        drop_last = False,
+    )
+
+    return dataset, dataloader
 
 
 def train_multi_step_sft_with_verification(
         model: PreTrainedModel,
         tokenizer: PreTrainedTokenizer,
         config: DictConfig,
-        train_data: Dict[str, List[str]], # instruction, code (optional)
+        train_data: Union[Dict[str, List[str]], List[str]], # instruction, code (optional)
         **kwargs,
     ):
     """Train a model using the multi-step SFT algorithm with verification.
@@ -391,8 +437,8 @@ def train_multi_step_sft_with_verification(
         model (PreTrainedModel): The model to train.
         tokenizer (PreTrainedTokenizer): The tokenizer to use for encoding and decoding text.
         config (DictConfig): The configuration object for the training run.
-        train_data (Dict[str, List[str]]): The training data to use. Must contain the
-            'instruction' field, and may contain the 'code' field.
+        train_data Union[Dict[str, List[str]], List[str]]: The training data to use.
+            Must contain the 'instruction' field, and may contain the 'code' field.
         **kwargs: Additional keyword arguments to pass to the training loop.
     """
     num_processes = torch.distributed.get_world_size()
@@ -400,26 +446,9 @@ def train_multi_step_sft_with_verification(
 
     ### Create the dataset ###
 
-    assert 'instruction' in train_data, \
-        "The training data must contain 'instruction' field!"
-    
-    # Current implementation requires starting code, so just give blank code if not provided
-    if 'code' not in train_data:
-        train_data['code'] = [''] * len(train_data['instruction'])
-
-    # Give each problem an index to make it easy to match problems to solutions later
-    train_data['problem_id'] = list(range(len(train_data['instruction'])))
-    dataset = Dataset.from_dict(train_data)
-    
-
+    batch_size = config.generation_batch_size * num_processes
+    dataset, dataloader = prepare_problem_dataset_and_loader(train_data, batch_size)
     log.info(f"Preparing dataset with {len(dataset)} samples")
-
-    dataloader = DataLoader(
-        dataset,
-        batch_size = config.batch_size * num_processes,
-        shuffle = True,
-        drop_last = False,
-    )
 
 
     ### Initialize the SFT trainer ###
@@ -461,9 +490,9 @@ def train_multi_step_sft_with_verification(
     }
 
     # Run the training loop
-    solutions = train_loop(
-        config, model, tokenizer, dataloader, trainer,
-        accelerator, generation_kwargs,
+    solutions = generate_and_train_loop(
+        config, model, tokenizer, dataloader, accelerator,
+        generation_kwargs, trainer,
     )
 
     log.info(f"Finished training at step {trainer.state.global_step}")
@@ -475,5 +504,63 @@ def train_multi_step_sft_with_verification(
         ordered_solutions[problem_id] = solution
 
     log.info(f"Found solutions for {len(solutions)}/{len(train_data['instruction'])} problems")
+
+    return ordered_solutions
+
+
+def generate_solutions(
+        model: PreTrainedModel,
+        tokenizer: PreTrainedTokenizer,
+        config: DictConfig,
+        problem_data: Union[Dict[str, List[str]], List[str]], # instruction, code (optional)
+    ):
+    """Train a model using the multi-step SFT algorithm with verification.
+    
+    Args:
+        model (PreTrainedModel): The model to train.
+        tokenizer (PreTrainedTokenizer): The tokenizer to use for encoding and decoding text.
+        config (DictConfig): The configuration object for the training run.
+        problem_data (Union[Dict[str, List[str]], List[str]]): Problems to generate solutions for.
+            Must contain the 'instruction' field, and may contain the 'code' field.
+        **kwargs: Additional keyword arguments to pass to the training loop.
+    """
+    num_processes = torch.distributed.get_world_size()
+    
+
+    ### Create the dataset ###
+    
+    batch_size = config.generation_batch_size * num_processes
+    dataset, dataloader = prepare_problem_dataset_and_loader(problem_data, batch_size)
+    log.info(f"Preparing dataset with {len(dataset)} samples")
+
+
+    ### Initialize interactive loop params ###
+
+    accelerator = Accelerator()
+
+    pad_token_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None \
+        else tokenizer.eos_token_id
+    generation_kwargs = {
+        'min_length': -1, # don't ignore the EOS token (see above)
+        'top_k': 0.0, # no top-k sampling
+        'top_p': 1.0, # no nucleus sampling
+        'do_sample': True,
+        'pad_token_id': pad_token_id,
+        'max_new_tokens': config.max_gen_length, # specify how many tokens you want to generate at most
+    }
+
+    # Run the training loop
+    solutions = generate_and_train_loop(
+        config, model, tokenizer, dataloader, accelerator,
+        generation_kwargs, trainer=None,
+    )
+
+    # Turn the solutions dictionary into a list of solutions in the same
+    # order as the input problems
+    ordered_solutions = [None for _ in range(len(problem_data['instruction']))]
+    for problem_id, solution in solutions.items():
+        ordered_solutions[problem_id] = solution
+
+    log.info(f"Found solutions for {len(solutions)}/{len(problem_data['instruction'])} problems")
 
     return ordered_solutions
