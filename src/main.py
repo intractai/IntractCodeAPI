@@ -9,8 +9,8 @@ from omegaconf import DictConfig, OmegaConf
 from fastapi import FastAPI
 
 sys.path.append('../')
-from src import modeling, config_handler
-from src.routers import generator, fine_tuner
+from src import modeling, config_handler, database
+from src.routers import auth, fine_tuner, generator
 
 
 logger = logging.getLogger(__name__)
@@ -45,9 +45,12 @@ def main(config: DictConfig):
     config = OmegaConf.create(config)
     modeling.ModelProvider(config.model)
     config_handler.ConfigProvider.initialize(config)
+    database.DatabaseProvider.initialize(config.database.path)
 
-    app.include_router(generator.router)
+
+    app.include_router(auth.router)
     app.include_router(fine_tuner.router)
+    app.include_router(generator.router)
     uvicorn.run(app, **config.server)
 
 

@@ -166,3 +166,5 @@ cython_debug/
 **/wandb/
 deprecated/**/data/
 src/outputs/
+**.txt
+**.sqlite3

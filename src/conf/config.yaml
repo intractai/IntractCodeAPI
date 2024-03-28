@@ -3,6 +3,9 @@ server:
   port: 8000
   # reload: True
 
+database:
+  path: "db.sqlite3"
+
 seed: null
 
 model:
