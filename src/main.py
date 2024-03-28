@@ -9,7 +9,7 @@ from omegaconf import DictConfig, OmegaConf
 from fastapi import FastAPI
 
 sys.path.append('../')
-from src import modeling, config
+from src import modeling, config_handler
 from src.routers import generator, fine_tuner
 
 
@@ -39,16 +39,16 @@ def get_app() -> FastAPI:
 
 
 @hydra.main(version_base=None, config_path="conf", config_name="config")
-def main(cfg: DictConfig):
+def main(config: DictConfig):
 
     configure_logging()
-    cfg = OmegaConf.create(cfg)
-    modeling.ModelProvider(cfg.model)
-    config.ConfigProvider.initialize(cfg)
+    config = OmegaConf.create(config)
+    modeling.ModelProvider(config.model)
+    config_handler.ConfigProvider.initialize(config)
 
     app.include_router(generator.router)
     app.include_router(fine_tuner.router)
-    uvicorn.run(app, **cfg.server)
+    uvicorn.run(app, **config.server)
 
 
 if __name__ == '__main__':

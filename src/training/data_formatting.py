@@ -158,7 +158,7 @@ def prepare_ntp_train_input(
 def format_ntp_inference_input(
         text: str,
         tokenizer: PreTrainedTokenizer,
-        cfg: Namespace,
+        config: Namespace,
         file_path: Optional[str] = None,
         max_decode_length: int = 256):
     """Format an input for next token prediction model inference.
@@ -166,7 +166,7 @@ def format_ntp_inference_input(
     Args:
         text (str): The text to generate from.
         tokenizer (PreTrainedTokenizer): The tokenizer.
-        cfg (Namespace): The config global config.
+        config (Namespace): The config global config.
         file_path (Optional[str], optional):
             The path to the file to generate from. Defaults to None.
         max_decode_length (int, optional):
@@ -182,7 +182,7 @@ def format_ntp_inference_input(
     )[0]
 
     max_context_length = \
-        cfg.model.context_length - len(fp_tokens) - max_decode_length
+        config.model.context_length - len(fp_tokens) - max_decode_length
     context_tokens = tokenizer.encode(
         text,
         return_tensors='pt',
@@ -209,7 +209,7 @@ def format_fim_inference_input(
         preceeding_text: str,
         proceeding_text: str,
         tokenizer: PreTrainedTokenizer,
-        cfg: Namespace,
+        config: Namespace,
         file_path: Optional[str] = None,
         max_decode_length: int = 256):
     """Format an input for FIM model inference.
@@ -218,7 +218,7 @@ def format_fim_inference_input(
         preceeding_text (str): The text preceding the hole.
         proceeding_text (str): The text following the hole.
         tokenizer (PreTrainedTokenizer): The tokenizer.
-        cfg (Namespace): The config global config.
+        config (Namespace): The config global config.
         file_path (Optional[str], optional):
             The path to the file to generate from. Defaults to None.
         max_decode_length (int, optional):
@@ -250,7 +250,7 @@ def format_fim_inference_input(
     # the max context length of the model
     # -4 is for the 4 FIM and BOS special tokens added to the prompt
     max_context_length = \
-        cfg.model.context_length - len(fp_tokens) - max_decode_length +  - 4
+        config.model.context_length - len(fp_tokens) - max_decode_length +  - 4
     raw_text_length = len(prefix) + len(suffix)
 
     # If the raw text is too long, truncate it
@@ -295,7 +295,7 @@ def format_fim_inference_input(
 def format_inference_input(
         preceeding_text: str,
         tokenizer: PreTrainedTokenizer,
-        cfg: Namespace,
+        config: Namespace,
         proceeding_text: Optional[str] = None,
         file_path: Optional[str] = None,
         max_decode_length: int = 256):
@@ -304,7 +304,7 @@ def format_inference_input(
     Args:
         preceeding_text (str): The text preceding the hole.
         tokenizer (PreTrainedTokenizer): The tokenizer.
-        cfg (Namespace): The config global config.
+        config (Namespace): The config global config.
         proceeding_text (Optional[str], optional):
             The text following the hole. Defaults to None.
         file_path (Optional[str], optional):
@@ -315,7 +315,7 @@ def format_inference_input(
     
     if proceeding_text is None or not proceeding_text.strip():
         return format_ntp_inference_input(
-            preceeding_text, tokenizer, cfg, file_path, max_decode_length)
+            preceeding_text, tokenizer, config, file_path, max_decode_length)
     
     return format_fim_inference_input(
-        preceeding_text, proceeding_text, tokenizer, cfg, file_path, max_decode_length)
+        preceeding_text, proceeding_text, tokenizer, config, file_path, max_decode_length)

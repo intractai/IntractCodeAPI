@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from transformers import PreTrainedTokenizer
 import torch
 
-from src import modeling, config
+from src import modeling, config_handler
 from src.training.data_formatting import format_inference_input
 
 
@@ -36,12 +36,12 @@ class GenerateData(BaseModel):
 
 
 @router.put("/generate")
-def generate(item: GenerateData, cfg: Annotated[Namespace, Depends(config.get_config)]):
+def generate(item: GenerateData, config: Annotated[Namespace, Depends(config_handler.get_config)]):
     # Cancel the current future if it exists
     try: 
         with ThreadPoolExecutor() as executor:
             # Create a new future for the incoming request
-            job_thread = executor.submit(generate_task, item, cfg)
+            job_thread = executor.submit(generate_task, item, config)
             # Run the future and return the result
             result = job_thread.result()
     except CancelledError:
@@ -55,7 +55,7 @@ def format_input(
         item: GenerateData,
         device: Union[str, torch.device],
         tokenizer: PreTrainedTokenizer,
-        cfg: Namespace):
+        config: Namespace):
     """Format the input for the model.
 
     Depending on the input, the example will either be formatted as
@@ -65,20 +65,20 @@ def format_input(
         item (GenerateData): The input data from a REST request.
         model (Model): The model.
         tokenizer (Tokenizer): The tokenizer.
-        cfg (Namespace): The config global config.
+        config (Namespace): The config global config.
     """
 
     return format_inference_input(
         preceeding_text = item.prior_context,
         tokenizer = tokenizer,
-        cfg = cfg,
+        config = config,
         proceeding_text = item.proceeding_context,
         file_path = item.file_path,
         max_decode_length = item.max_decode_length,
     ).to(device)
 
 
-def generate_task(item: GenerateData, cfg: Namespace):
+def generate_task(item: GenerateData, config: Namespace):
     # Print the current thread id to show that it is different for each request
     modeling.GLOBAL_GENERATE_THREAD_ID = threading.get_ident()
     logger.info(f"Current generate task thread id: {modeling.GLOBAL_GENERATE_THREAD_ID}")
@@ -87,7 +87,7 @@ def generate_task(item: GenerateData, cfg: Namespace):
     model = model_provider.get_model()
     tokenizer = model_provider.get_model_utils()['tokenizer']
 
-    inputs = format_input(item, model.device, tokenizer, cfg)
+    inputs = format_input(item, model.device, tokenizer, config)
 
     outputs = model.generate(
         **inputs, max_new_tokens=item.max_decode_length,

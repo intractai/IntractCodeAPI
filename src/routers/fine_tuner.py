@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from concurrent.futures import ThreadPoolExecutor, CancelledError
 
-from src import config, modeling
+from src import config_handler, modeling
 from src.training import finetune
 from src.training.interactive.train_multi_step_sft import (
     generate_solutions,
@@ -32,7 +32,7 @@ def verify_request_data(item: ProjectFinetuneData):
 
 
 @router.post("/finetune/project")
-def finetune_project(item: ProjectFinetuneData, cfg: Annotated[Namespace, Depends(config.get_config)]):
+def finetune_project(item: ProjectFinetuneData, config: Annotated[Namespace, Depends(config_handler.get_config)]):
     try:
         verify_request_data(item)
     except ValueError as e:
@@ -41,7 +41,7 @@ def finetune_project(item: ProjectFinetuneData, cfg: Annotated[Namespace, Depend
     try: 
         with ThreadPoolExecutor() as executor:
             # Create a new future for the incoming request
-            job_thread = executor.submit(finetune_task, item, cfg)
+            job_thread = executor.submit(finetune_task, item, config)
             # Run the future and return the result
             result = job_thread.result()
     except CancelledError:
@@ -74,54 +74,60 @@ def get_documentation_data(
     return return_data
 
 
-# Finetune steps:
-#   1. Collect documentation for each library
-#   2. Finetune the model with NTP and FIM on the collected documentation
-#   3. Finetune the model with NTP and FIM on code snippets for each library (collected from documentation)
-#   4. Generate practice problems and ideal solutions for each library
-#   5. Instruction finetune on the generated practice problems
-#   6. Finetune the model with NTP and FIM on the verified solutions
-#
-# Options:
-#   - train_on_code
-#   - train_on_docs
-#   - train_on_doc_code
-#   - train_on_practice_problems (uses instruction finetuning)
-#   - train_on_verified_solutions
-#
-#   - use_ntp (next token prediction)
-#   - use_fim (fill-in-the-middle)
+def finetune_task(item: ProjectFinetuneData, config: Namespace):
+    """Finetune the model with the user's codebase and documentation.
+    
+    Finetune steps:
+        1. Collect documentation for each library
+        2. Finetune the model with NTP and FIM on the collected documentation
+        3. Finetune the model with NTP and FIM on code snippets for each library (collected from documentation)
+        4. Generate practice problems and ideal solutions for each library
+        5. Instruction finetune on the generated practice problems
+        6. Finetune the model with NTP and FIM on the verified solutions
 
-def finetune_task(item: ProjectFinetuneData, cfg: Namespace):
+    Options (in config):
+        - train_on_code
+        - train_on_docs
+        - train_on_doc_code
+        - train_on_practice_problems (uses instruction finetuning)
+        - train_on_verified_solutions
+
+        - use_ntp (next token prediction)
+        - use_fim (fill-in-the-middle)
+    
+    Args:
+        item (ProjectFinetuneData): The project, language, and library data.
+        config (Namespace): The global config.
+    """
     item.libraries = item.libraries or []
 
     # Print the current thread id to show that it is different for each request
     modeling.GLOBAL_FINETUNE_THREAD_ID = threading.get_ident()
-    model_cfg = cfg.model
+    model_config = config.model
 
     model_provider = modeling.ModelProvider.get_instance()
     tokenizer = model_provider.get_model_utils()['tokenizer']
     model = model_provider.get_model()
 
     # Determine what data to collect / generate
-    require_problems = cfg.train.train_on_practice_problems \
-        or cfg.train.train_on_verified_solutions
+    require_problems = config.train.train_on_practice_problems \
+        or config.train.train_on_verified_solutions
     require_docs = (
-        cfg.train.train_on_docs \
-        or cfg.train.train_on_doc_code \
+        config.train.train_on_docs \
+        or config.train.train_on_doc_code \
         or require_problems
     ) and bool(item.libraries)
         
     
     train_methods = []
-    if cfg.train.use_ntp:
+    if config.train.use_ntp:
         train_methods.append('ntp')
-    if cfg.train.use_fim:
+    if config.train.use_fim:
         train_methods.append('fim')
     
     # Get the documentation data for each library
     if require_docs:
-        n_workers = cfg.train.max_retrieval_threads
+        n_workers = config.train.max_retrieval_threads
         executor = ThreadPoolExecutor(max_workers=n_workers)
         lib_futures = {}
         for library in item.libraries:
@@ -129,11 +135,11 @@ def finetune_task(item: ProjectFinetuneData, cfg: Namespace):
                 get_documentation_data, library, require_problems)
 
     # Train on the user's codebase while asynchronously collecting documentation
-    if cfg.train.train_on_code and item.project_dict:
+    if config.train.train_on_code and item.project_dict:
         logger.info("Training on user's codebase")
         finetune.train_self_supervised_project(
-            model, tokenizer, item.project_dict, cfg.train,
-            output_dir=model_cfg.save_model_dir, report_to='none',
+            model, tokenizer, item.project_dict, config.train,
+            output_dir=model_config.save_model_dir, report_to='none',
             train_methods=train_methods, # TODO: Test train_methods
         )
 
@@ -154,29 +160,29 @@ def finetune_task(item: ProjectFinetuneData, cfg: Namespace):
             return {"result": "error", "message": "Failed to get documentation data."}
 
         # Train on the documentation text
-        if cfg.train.train_on_docs:
+        if config.train.train_on_docs:
             train_documents = []
             for data in lib_data.values():
                 train_documents.extend(data['text'])
 
             logger.info(f"Training on {len(train_documents)} documents of documentation text")
             finetune.train_self_supervised_documents( # TODO: Test train_self_supervised_documents
-                model, tokenizer, train_documents, cfg.train,
-                output_dir=model_cfg.save_model_dir, report_to='none',
+                model, tokenizer, train_documents, config.train,
+                output_dir=model_config.save_model_dir, report_to='none',
                 train_methods=['ntp'],
             )
                 
         # Train on the documentation code snippets
 
-        if cfg.train.train_on_doc_code:
+        if config.train.train_on_doc_code:
             train_code = []
             for data in lib_data.values():
                 train_code.extend(data['code'])
 
             logger.info("Training on documentation code snippets")
             finetune.train_self_supervised_documents(
-                model, tokenizer, train_code, cfg.train,
-                output_dir=model_cfg.save_model_dir, report_to='none',
+                model, tokenizer, train_code, config.train,
+                output_dir=model_config.save_model_dir, report_to='none',
                 train_methods=train_methods,
             )
                 
@@ -189,22 +195,22 @@ def finetune_task(item: ProjectFinetuneData, cfg: Namespace):
             # Can later also add a 'code' field to provide starting code
             train_problems = {'instruction': train_problems}
 
-            if cfg.train.train_on_practice_problems:
+            if config.train.train_on_practice_problems:
                 logger.info("Training on practice problems and generating solutions")
                 solutions = train_multi_step_sft_with_verification( # TODO: Test train_sft_with_verification, make sure returned solutions are correct
-                    model, tokenizer, train_problems, cfg.train,
-                    output_dir=model_cfg.save_model_dir, report_to='none')
+                    model, tokenizer, train_problems, config.train,
+                    output_dir=model_config.save_model_dir, report_to='none')
                 
-            elif cfg.train.train_on_verified_solutions:
+            elif config.train.train_on_verified_solutions:
                 logger.info("Generating solutions to practice problems")
                 solutions = generate_solutions( # TODO: Test generate_solutions
-                    model, tokenizer, train_problems, cfg.train)
+                    model, tokenizer, train_problems, config.train)
             
             # Train on the verified solutions
-            if cfg.train.train_on_verified_solutions:
+            if config.train.train_on_verified_solutions:
                 finetune.train_self_supervised_documents(
-                    model, tokenizer, solutions, cfg.train,
-                    output_dir=model_cfg.save_model_dir, report_to='none',
+                    model, tokenizer, solutions, config.train,
+                    output_dir=model_config.save_model_dir, report_to='none',
                     train_methods=train_methods,
                 )
 
