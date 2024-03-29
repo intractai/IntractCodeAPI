@@ -9,8 +9,9 @@ from omegaconf import DictConfig, OmegaConf
 from fastapi import FastAPI
 
 sys.path.append('../')
-from src import modeling, config_handler, database
+from src import config_handler, database, modeling
 from src.routers import auth, fine_tuner, generator
+from src.users import SessionTracker
 
 
 logger = logging.getLogger(__name__)
@@ -38,19 +39,25 @@ def get_app() -> FastAPI:
     return app
 
 
-@hydra.main(version_base=None, config_path="conf", config_name="config")
+@hydra.main(version_base=None, config_path='conf', config_name='config')
 def main(config: DictConfig):
 
+    # Start logging and config
     configure_logging()
     config = OmegaConf.create(config)
+
+    # Initialize singletons
     modeling.ModelProvider(config.model)
     config_handler.ConfigProvider.initialize(config)
     database.DatabaseProvider.initialize(config.database.path)
+    SessionTracker.get_instance(**config.session)
 
-
+    # Include routers
     app.include_router(auth.router)
     app.include_router(fine_tuner.router)
     app.include_router(generator.router)
+
+    # Run the server
     uvicorn.run(app, **config.server)
 
 

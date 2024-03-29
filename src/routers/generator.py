@@ -5,12 +5,14 @@ from typing import Annotated, Optional, Union
 
 from concurrent.futures import ThreadPoolExecutor, CancelledError
 from fastapi import APIRouter, Depends
+from omegaconf import DictConfig
 from pydantic import BaseModel
-from transformers import PreTrainedTokenizer
+from transformers import BatchEncoding, PreTrainedTokenizer
 import torch
 
 from src import modeling, config_handler
 from src.training.data_formatting import format_inference_input
+from src.users import validate_user_session
 
 
 logger = logging.getLogger(__name__)
@@ -35,8 +37,12 @@ class GenerateData(BaseModel):
     max_decode_length: int = 256
 
 
-@router.put("/generate")
-def generate(item: GenerateData, config: Annotated[Namespace, Depends(config_handler.get_config)]):
+@router.post('/generate')
+def generate(
+        item: GenerateData,
+        config: Annotated[DictConfig, Depends(config_handler.get_config)],
+        username: Annotated[str, Depends(validate_user_session)],
+    ):
     # Cancel the current future if it exists
     try: 
         with ThreadPoolExecutor() as executor:
@@ -47,7 +53,7 @@ def generate(item: GenerateData, config: Annotated[Namespace, Depends(config_han
     except CancelledError:
         print("Canceled generation!")
         logger.info("Cancelled /generate execution by a new request.")
-        result = {"error": "Cancelled by new request"}
+        result = {'error': "Cancelled by new request"}
     return result
 
 
@@ -55,7 +61,8 @@ def format_input(
         item: GenerateData,
         device: Union[str, torch.device],
         tokenizer: PreTrainedTokenizer,
-        config: Namespace):
+        config: DictConfig,
+    ) -> BatchEncoding:
     """Format the input for the model.
 
     Depending on the input, the example will either be formatted as
@@ -66,6 +73,9 @@ def format_input(
         model (Model): The model.
         tokenizer (Tokenizer): The tokenizer.
         config (Namespace): The config global config.
+
+    Returns:
+        BatchEncoding: The formatted input with input_ids and an attention_mask.
     """
 
     return format_inference_input(
@@ -111,4 +121,4 @@ def generate_task(item: GenerateData, config: Namespace):
     output_text = tokenizer.decode(out_tokens, skip_special_tokens=True)
     score = transition_scores.mean().item()
 
-    return {"generated_text": output_text, "score": score}
+    return {'generated_text': output_text, 'score': score}

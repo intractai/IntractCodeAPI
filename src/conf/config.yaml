@@ -1,7 +1,11 @@
 server:
   host: 127.0.0.1
   port: 8000
-  # reload: True
+
+session:
+  max_active_sessions: 4
+  eviction_interval: 120 # Check for idle sessions every 2 minutes
+  max_session_idle_time: 600 # Evict sessions that have been idle for 10 minutes
 
 database:
   path: "db.sqlite3"

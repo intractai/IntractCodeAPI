@@ -13,6 +13,7 @@ from src.training.interactive.train_multi_step_sft import (
     generate_solutions,
     train_multi_step_sft_with_verification,
 )
+from src.users import validate_user_session
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -32,7 +33,11 @@ def verify_request_data(item: ProjectFinetuneData):
 
 
 @router.post("/finetune/project")
-def finetune_project(item: ProjectFinetuneData, config: Annotated[Namespace, Depends(config_handler.get_config)]):
+def finetune_project(
+        item: ProjectFinetuneData,
+        config: Annotated[Namespace, Depends(config_handler.get_config)],
+        username: Annotated[str, Depends(validate_user_session)],
+    ):
     try:
         verify_request_data(item)
     except ValueError as e:
