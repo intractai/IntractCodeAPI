@@ -16,6 +16,7 @@ from src.training.interactive.train_multi_step_sft import (
     train_multi_step_sft_with_verification,
 )
 from src.users import validate_user_session
+from src.crawler.docs_scraper import get_doc_data
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -70,12 +71,10 @@ def get_documentation_data(
     Returns:
         Dict[str, List[str]]: The documentation data.
     """
-    return_data = {
-        'text': ['Documentation page 1', 'Ninjax is a general module system for JAX. It gives the user complete and transparent control over updating the state of each module, bringing the flexibility of PyTorch and TensorFlow to JAX. Moreover, Ninjax makes it easy to mix and match modules from different libraries, such as Flax and Haiku.'],
-        'code': ['def train(self, x, y):', 'model = MyModel(3, lr=0.01, name="model")', 'fake code'],
-    }
+    return_data = get_doc_data(library)
 
     if gen_problems:
+        raise NotImplementedError("Problem generation is not implemented yet.")
         return_data['problems'] = ['Write a function that takes a list of numbers and returns the sum of the numbers.', 'Write a function that takes a list of numbers and returns the average of the numbers.']
 
     return return_data
