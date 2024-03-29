@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import logging
 import threading
 import time
 from typing import Optional, Union
@@ -10,12 +11,14 @@ from passlib.context import CryptContext
 from pydantic import BaseModel, EmailStr
 
 from src.database import make_db_connection, USER_TABLE
+from src.modeling import ModelProvider
 
 
 SECRET_KEY = '0GHa94H6pg89hlgvoJYeG+1LTKkjysoxYKIumfXirog='
 ENCRYPTION_ALGORITHM = 'HS256'
 
 
+logger = logging.getLogger(__name__)
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl='token')
 pwd_context = CryptContext(schemes=['bcrypt'], deprecated='auto')
 
@@ -69,16 +72,47 @@ class SessionTracker:
         """
         def eviction_process():
             while True:
-                current_time = time.time()
-                with SessionTracker._lock:
-                    for user, last_active in list(self.user_activity.items()):
-                        if current_time - last_active > self.max_session_idle_time:
-                            del self.user_activity[user]
+                for user in list(self.user_activity):
+                    if not self.is_user_active(user):
+                        self.evict_user(user)
                 time.sleep(self.eviction_interval)
 
         thread = threading.Thread(target=eviction_process)
         thread.daemon = True
         thread.start()
+
+    def is_user_active(self, username: str) -> bool:
+        """Check if a user is active in the session tracker.
+        
+        Args:
+            username (str): The username to check.
+            
+        Returns:
+            bool: True if the user is active, False if the user is not active.
+        """
+        return self.user_activity.get(username, 0) > time.time() - self.max_session_idle_time
+
+    def evict_user(self, username: str) -> bool:
+        """Evict a user from the session tracker and deletes their models.
+        
+        Args:
+            username (str): The username to evict.
+            
+        Returns:
+            bool: True if the user was evicted, False if the user was not evicted.
+        """
+        evicted = False
+        with SessionTracker._lock:
+            if username in self.user_activity:
+                del self.user_activity[username]
+                evicted = True
+
+        if evicted:
+            model_provider = ModelProvider.get_instance()
+            model_provider.delete_model(username)
+            logger.info(f"Evicted user {username}")
+
+        return evicted
 
     def update_user_session(self, username: str) -> bool:
         """Update a user's session by updating their last activity time.

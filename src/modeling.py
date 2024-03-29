@@ -1,10 +1,11 @@
 import abc
 from argparse import Namespace
 from concurrent.futures import CancelledError
+import copy
 import logging
 import os
 import threading
-from typing import Tuple
+from typing import NamedTuple, Tuple
 
 import bitsandbytes as bnb
 from huggingface_hub import snapshot_download
@@ -99,14 +100,14 @@ class ModelLoader(abc.ABC):
 
 class StandardModelLoader(ModelLoader):
 
-    def load_model(self) -> Tuple[torch.nn.Module, dict]:
+    def load_model(self, device=None) -> Tuple[torch.nn.Module, dict]:
 
         global GLOBAL_MAIN_THREAD_ID
 
         model_dir = self._config.model_dir
         model_name = self._config.model_name
 
-        device = self._determine_device()
+        device = device or self._determine_device()
         dtype = self._determine_model_type()
         use_flash_attention = self._determine_flash_attention()
 
@@ -258,6 +259,13 @@ class QLoraModelLoader(ModelLoader):
         return model, {'tokenizer': tokenizer}
 
 
+# Named tuple for model and model utilities
+ModelTuple = NamedTuple(
+    'ModelTuple',
+    [('model', torch.nn.Module), ('model_utils', dict)]
+)
+
+
 class ModelProvider:
     _instance = None
     _lock = threading.Lock()
@@ -274,7 +282,7 @@ class ModelProvider:
             # Acquire the lock and check again to ensure no other thread created the instance
             with cls._lock:
                 if cls._instance is None:
-                    cls._instance = cls()
+                    cls._instance = cls(config)
         return cls._instance
 
     def __init__(self, config: dict):
@@ -282,25 +290,82 @@ class ModelProvider:
             raise Exception("This class is a singleton!")
         else:
             ModelProvider._instance = self
+
         # Initialize the model here
-        self._model, self._model_utils = \
-            self._model_loaders[config.model_type](config).load_model()
+        self.config = config
+        self._models: dict[str, ModelTuple] = {}
+        self._user_locks = {} # Locks for each user's model
 
-    def get_model(self):
-        return self._model
+        # New models are cloned from the base model, which is stored on the CPU
+        # This drastically reduces load times for newly active users
+        model_loader = ModelProvider._model_loaders[config.model_type](config)
+        model, model_utils = model_loader.load_model(device='cpu')
+        self._base_model_tuple = ModelTuple(model, model_utils)
+        self._target_device = model_loader._determine_device()
 
-    def get_model_utils(self):
-        return self._model_utils
+    def _get_user_lock(self, username: str):
+        """Get the lock for the user's model."""
+        if username not in self._user_locks:
+            with ModelProvider._lock:
+                if username not in self._user_locks:
+                    self._user_locks[username] = threading.Lock()
+        return self._user_locks[username]
 
-    def update_model(self, model: torch.nn.Module):
-        with self._lock:  # Acquire the lock for thread safety
-            self._model = model
+    def create_new_model_tuple(self) -> ModelTuple:
+        """Create a new model tuple from the base model."""
+        model = copy.deepcopy(self._base_model_tuple.model)
+        model = model.to(self._target_device)
+        model_utils = self._base_model_tuple.model_utils
+        return ModelTuple(model, model_utils)
 
-def get_model():
+    def get_model_tuple(self, username: str) -> ModelTuple:
+        """Get the model and model utilities for the user."""
+        with self._get_user_lock(username):
+            if username not in self._models:
+                self._models[username] = self.create_new_model_tuple()
+            return self._models[username]
+
+    def get_model(self, username: str):
+        return self.get_model_tuple(username).model
+
+    def get_model_utils(self, username: str):
+        return self.get_model_tuple(username).model_utils
+
+    def update_model(self, username: str, model: torch.nn.Module):
+        """Update the model for the user."""
+        with self._get_user_lock(username):
+            if username in self._models:
+                self._models[username] = ModelTuple(model, self._models[username].model_utils)
+            else:
+                raise ValueError(f"Model for user {username} does not exist.")
+
+    def delete_model(self, username: str):
+        """Delete the model for the user."""
+        with self._get_user_lock(username):
+            if username in self._models:
+                del self._models[username]
+            else:
+                logger.warning(f"Tried to delete model for user {username}, but it does not exist.")
+        
+        torch.cuda.empty_cache()
+
+        with ModelProvider._lock:
+            if username in self._user_locks:
+                del self._user_locks[username]
+            else:
+                logger.warning(f"Tried to delete lock for user {username}, but it does not exist.")
+
+
+def get_model(username: str):
     model_provider = ModelProvider.get_instance()
-    return model_provider.get_model()
+    return model_provider.get_model(username)
 
 
-def get_model_utils():
+def get_model_utils(username: str):
     model_provider = ModelProvider.get_instance()
-    return model_provider.get_model_utils()
+    return model_provider.get_model_utils(username)
+
+
+def get_tokenizer(username: str):
+    model_utils = get_model_utils(username)
+    return model_utils['tokenizer']

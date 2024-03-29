@@ -9,7 +9,8 @@ from omegaconf import DictConfig, OmegaConf
 from fastapi import FastAPI
 
 sys.path.append('../')
-from src import config_handler, database, modeling
+from src import config_handler, database
+from src.modeling import ModelProvider
 from src.routers import auth, fine_tuner, generator
 from src.users import SessionTracker
 
@@ -24,12 +25,12 @@ def configure_logging():
     handler = logging.StreamHandler(sys.stdout)
     handler.setLevel(logging.INFO)
     formatter = logging.Formatter(
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
     handler.setFormatter(formatter)
     logger.addHandler(handler)
     # add log in the file
-    handler = logging.FileHandler("log.txt")
+    handler = logging.FileHandler('../log.txt')
     handler.setLevel(logging.INFO)
     handler.setFormatter(formatter)
     logger.addHandler(handler)
@@ -47,9 +48,9 @@ def main(config: DictConfig):
     config = OmegaConf.create(config)
 
     # Initialize singletons
-    modeling.ModelProvider(config.model)
     config_handler.ConfigProvider.initialize(config)
     database.DatabaseProvider.initialize(config.database.path)
+    ModelProvider.get_instance(config.model)
     SessionTracker.get_instance(**config.session)
 
     # Include routers

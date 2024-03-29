@@ -8,7 +8,7 @@ session:
   max_session_idle_time: 600 # Evict sessions that have been idle for 10 minutes
 
 database:
-  path: "db.sqlite3"
+  path: "../db.sqlite3"
 
 seed: null
 

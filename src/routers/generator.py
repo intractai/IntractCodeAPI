@@ -1,4 +1,3 @@
-from argparse import Namespace
 import logging
 import threading
 from typing import Annotated, Optional, Union
@@ -10,7 +9,8 @@ from pydantic import BaseModel
 from transformers import BatchEncoding, PreTrainedTokenizer
 import torch
 
-from src import modeling, config_handler
+from src import config_handler, modeling
+from src.modeling import get_model, get_tokenizer
 from src.training.data_formatting import format_inference_input
 from src.users import validate_user_session
 
@@ -47,7 +47,7 @@ def generate(
     try: 
         with ThreadPoolExecutor() as executor:
             # Create a new future for the incoming request
-            job_thread = executor.submit(generate_task, item, config)
+            job_thread = executor.submit(generate_task, item, config, username)
             # Run the future and return the result
             result = job_thread.result()
     except CancelledError:
@@ -88,14 +88,13 @@ def format_input(
     ).to(device)
 
 
-def generate_task(item: GenerateData, config: Namespace):
+def generate_task(item: GenerateData, config: DictConfig, username: str):
     # Print the current thread id to show that it is different for each request
     modeling.GLOBAL_GENERATE_THREAD_ID = threading.get_ident()
     logger.info(f"Current generate task thread id: {modeling.GLOBAL_GENERATE_THREAD_ID}")
 
-    model_provider = modeling.ModelProvider.get_instance()
-    model = model_provider.get_model()
-    tokenizer = model_provider.get_model_utils()['tokenizer']
+    model = get_model(username)
+    tokenizer = get_tokenizer(username)
 
     inputs = format_input(item, model.device, tokenizer, config)
 

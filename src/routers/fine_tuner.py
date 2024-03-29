@@ -4,10 +4,12 @@ import logging
 import threading
 
 from fastapi import APIRouter, Depends
+from omegaconf import DictConfig
 from pydantic import BaseModel
 from concurrent.futures import ThreadPoolExecutor, CancelledError
 
 from src import config_handler, modeling
+from src.modeling import get_model, get_tokenizer
 from src.training import finetune
 from src.training.interactive.train_multi_step_sft import (
     generate_solutions,
@@ -32,10 +34,10 @@ def verify_request_data(item: ProjectFinetuneData):
         raise ValueError("Language must be provided if libraries are provided.")
 
 
-@router.post("/finetune/project")
+@router.post('/finetune/project')
 def finetune_project(
         item: ProjectFinetuneData,
-        config: Annotated[Namespace, Depends(config_handler.get_config)],
+        config: Annotated[DictConfig, Depends(config_handler.get_config)],
         username: Annotated[str, Depends(validate_user_session)],
     ):
     try:
@@ -46,7 +48,7 @@ def finetune_project(
     try: 
         with ThreadPoolExecutor() as executor:
             # Create a new future for the incoming request
-            job_thread = executor.submit(finetune_task, item, config)
+            job_thread = executor.submit(finetune_task, item, config, username)
             # Run the future and return the result
             result = job_thread.result()
     except CancelledError:
@@ -79,7 +81,7 @@ def get_documentation_data(
     return return_data
 
 
-def finetune_task(item: ProjectFinetuneData, config: Namespace):
+def finetune_task(item: ProjectFinetuneData, config: DictConfig, username: str):
     """Finetune the model with the user's codebase and documentation.
     
     Finetune steps:
@@ -102,7 +104,8 @@ def finetune_task(item: ProjectFinetuneData, config: Namespace):
     
     Args:
         item (ProjectFinetuneData): The project, language, and library data.
-        config (Namespace): The global config.
+        config (DictConfig): The global config.
+        username (str): The username of the user.
     """
     item.libraries = item.libraries or []
 
@@ -110,9 +113,8 @@ def finetune_task(item: ProjectFinetuneData, config: Namespace):
     modeling.GLOBAL_FINETUNE_THREAD_ID = threading.get_ident()
     model_config = config.model
 
-    model_provider = modeling.ModelProvider.get_instance()
-    tokenizer = model_provider.get_model_utils()['tokenizer']
-    model = model_provider.get_model()
+    model = get_model(username)
+    tokenizer = get_tokenizer(username)
 
     # Determine what data to collect / generate
     require_problems = config.train.train_on_practice_problems \
