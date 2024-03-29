@@ -232,10 +232,26 @@ async def get_user_by_token(token: str) -> dict:
 
 
 async def create_user(user: UserCreate):
-    """Creates a new user by inserting their information into the database."""
-    hashed_password = pwd_context.hash(user.password)
+    """Creates a new user by inserting their information into the database, ensuring the email is not already used."""
     async with make_db_connection() as db:
-        await db.execute(f"INSERT INTO {USER_TABLE} (username, email, hashed_password) VALUES (?, ?, ?)",
+        # Prepare the query to check if the email or username already exists
+        username_cursor = await db.execute(f'SELECT username FROM {USER_TABLE} WHERE username = ?', (user.username,))
+        username_result = await username_cursor.fetchone()
+
+        if username_result:
+            # If a result is found, then the username already exists in the database.
+            raise HTTPException(status_code=409, detail="Username already in use")
+
+        email_cursor = await db.execute(f'SELECT email FROM {USER_TABLE} WHERE email = ?', (user.email,))
+        email_result = await email_cursor.fetchone()
+        
+        if email_result:
+            # If a result is found, then the email already exists in the database.
+            raise HTTPException(status_code=409, detail="Email already in use")
+        
+        # Proceed with user creation if the email does not exist in the database
+        hashed_password = pwd_context.hash(user.password)
+        await db.execute('INSERT INTO {} (username, email, hashed_password) VALUES (?, ?, ?)'.format(USER_TABLE),
                          (user.username, user.email, hashed_password))
         await db.commit()
 
