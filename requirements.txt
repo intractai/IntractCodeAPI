@@ -24,3 +24,7 @@ python-jose==3.3.0
 passlib==1.7.4
 python-multipart==0.0.5
 wandb==0.16.0
+googlesearch-python
+scrapy
+html2text
+trafilatura
