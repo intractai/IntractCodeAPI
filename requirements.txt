@@ -30,3 +30,4 @@ html2text
 trafilatura
 litellm
 tenacity
+beautifulsoup4
