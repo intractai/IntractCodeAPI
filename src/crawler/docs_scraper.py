@@ -8,11 +8,10 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 
 import scrapy
 import html2text
-from utils.html_processors import extract_main_text_from_html
 from scrapy.crawler import CrawlerProcess
 
 from src.crawler.utils.docs_finder import find_doc_first_page
-
+from src.crawler.utils.html_processors import extract_main_text_from_html
 
 html2text.config.MARK_CODE = False
 LATEST_DOCS_KEYWORDS = ['latest', 'stable', 'current', 'master', 'release', 'main', 'default']

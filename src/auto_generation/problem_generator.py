@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 import os
+import logging
 
 import jinja2
 import yaml
@@ -7,7 +8,9 @@ from litellm import completion
 from tenacity import retry, stop_after_attempt, wait_fixed
 
 from src.crawler.bfs_scraper import bfs_scrapper
-from src.config_handler import get_config
+from src import config_handler
+
+logger = logging.getLogger(__name__)
 
 class AutoDataGenerator(ABC):
 
@@ -17,7 +20,7 @@ class AutoDataGenerator(ABC):
 
     def _generate_helper(self, user_content: str, system_content: str, temperature: float):
         response = completion(
-            model=self._model, 
+            model=self._model_name, 
             messages=[
                 {"content": system_content, "role": "system"},
                 {"content": user_content, "role": "user"},
@@ -49,8 +52,7 @@ class LibraryProblemGenerator(AutoDataGenerator):
         user_content = template.render(library_docs=doc_info, language_name=self._lang, 
                                         library=self._library, feature_num=self._feature_num)
 
-        problem_description = self._generate(
-            model=self._model, 
+        problem_description = self._generate_helper(
             user_content=user_content, 
             system_content=system_content,
             temperature=cfg['temperature']
@@ -69,8 +71,7 @@ class LibraryProblemGenerator(AutoDataGenerator):
                                     library=self._library, feature_num=self._feature_num,
                                     problem_num=self._problem_num_per_bullet_point)
         
-        problems = self._generate(
-            model=self._model, 
+        problems = self._generate_helper(
             user_content=user_content, 
             system_content=system_content,
             temperature=cfg['temperature']
@@ -82,10 +83,13 @@ class LibraryProblemGenerator(AutoDataGenerator):
         return problems
 
     def generate(self):
-        cfg = get_config()
+        cfg = config_handler.get_config()
         doc_info = bfs_scrapper(self._library, self._max_chars)
+        logger.debug(f"FINISHED: Extracting {self._library} documentation information.")
         doc_desc = self._generate_doc_description(cfg['describe_library_doc'], doc_info)
+        logger.debug(f"FINISHED: Generating {self._library} description.")
         problems = self._generate_problems_description(cfg['generate_library_problems'], doc_desc)
+        logger.debug(f"FINISHED: Generating {self._library} problems.")
         return problems
 
 
