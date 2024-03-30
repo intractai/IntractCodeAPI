@@ -1,0 +1,32 @@
+generate_library_problems:
+  temperature: 0.8
+  system: You are a GPT-4 expert in designing programming problems in {{language_name}} that can help a junior programmer deeply understand {{library}} programming library.
+  user: >
+    You are given a detailed description and analysis of {{library}} programming library. 
+
+    Library description:
+    ======
+    {{ library_desc|trim }}
+    ======
+
+    Different features of the library are shown as bullet points in the given description and there are {{feature_num}} features in total.
+    Start from the first bullet-point, carefully read it, and generate {{problem_num}} distinct code problems for that bullet point. Repeat this process for all bullet points in the given description.
+    Ensure that the problems are challenging and require a deep understanding of the described library features in the given bullet point.
+
+    The output must be a valid YAML object equivalent to type $CodeProblems, according to the following Pydantic definitions:
+    ======
+    class CodeProblems(BaseModel):
+        problems: List[str] = Field(description='A list of problems for the given library description' min_items={{problem_num*feature_num}}, max_items={{problem_num*feature_num}})
+    ======
+
+    Example YAML output:
+    ```yaml
+    problems: 
+    - 
+    ...
+    ```
+
+    Each YAML output MUST be after a newline, and indented.
+
+    Answer:
+    ```yaml
