@@ -28,3 +28,5 @@ googlesearch-python
 scrapy
 html2text
 trafilatura
+litellm
+tenacity
