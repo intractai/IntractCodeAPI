@@ -17,6 +17,7 @@ from src.training.interactive.train_multi_step_sft import (
 )
 from src.users import validate_user_session
 from src.crawler.docs_scraper import get_doc_data
+from src.auto_generation.problem_generator import LibraryProblemGenerator
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -60,7 +61,9 @@ def finetune_project(
 
 
 def get_documentation_data(
-        library: str, gen_problems: bool = False
+        library: str, gen_problems: bool = False, lang: str = 'Python',
+        feature_num: int = 10, problem_num_per_bullet_point: int = 5,
+        max_char_count: int = 10000, model: str = 'gpt-3.5-turbo'
     ) -> Dict[str, List[str]]:
     """Get the documentation data for a library.
     
@@ -73,9 +76,10 @@ def get_documentation_data(
     """
     return_data = get_doc_data(library)
 
-    if gen_problems:
-        raise NotImplementedError("Problem generation is not implemented yet.")
-        return_data['problems'] = ['Write a function that takes a list of numbers and returns the sum of the numbers.', 'Write a function that takes a list of numbers and returns the average of the numbers.']
+    if gen_problems:        
+        lib_problem_generator = LibraryProblemGenerator(model, lang, library, max_char_count,
+                                                         feature_num, problem_num_per_bullet_point)
+        return_data['problems'] = lib_problem_generator.generate()
 
     return return_data
 
