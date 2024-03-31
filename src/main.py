@@ -10,7 +10,7 @@ from fastapi import FastAPI
 
 sys.path.append('../')
 from src import config_handler, database
-from src.modeling import ModelProvider
+from src.modeling import ModelProvider, set_main_thread_id
 from src.routers import auth, fine_tuner, generator
 from src.users import SessionTracker
 
@@ -50,8 +50,11 @@ def main(config: DictConfig):
     # Initialize singletons
     config_handler.ConfigProvider.initialize(config)
     database.DatabaseProvider.initialize(config.database.path)
-    ModelProvider.get_instance(config.model)
-    SessionTracker.get_instance(**config.session)
+    model_provider = ModelProvider.get_instance(config.model)
+    SessionTracker.get_instance(model_provider, **config.session)
+
+    # Sets main thread ID
+    set_main_thread_id()
 
     # Include routers
     app.include_router(auth.router)

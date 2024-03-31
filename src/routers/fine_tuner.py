@@ -1,7 +1,7 @@
-from typing import Annotated, Dict, List, Optional
-from argparse import Namespace
+from functools import partial
 import logging
 import threading
+from typing import Annotated, Dict, List, Optional
 
 from fastapi import APIRouter, Depends
 from omegaconf import DictConfig
@@ -16,6 +16,7 @@ from src.training.interactive.train_multi_step_sft import (
     train_multi_step_sft_with_verification,
 )
 from src.users import validate_user_session
+
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -38,24 +39,20 @@ def verify_request_data(item: ProjectFinetuneData):
 def finetune_project(
         item: ProjectFinetuneData,
         config: Annotated[DictConfig, Depends(config_handler.get_config)],
-        username: Annotated[str, Depends(validate_user_session)],
+        username: Annotated[str, Depends(partial(validate_user_session, activity='finetune'))],
     ):
     try:
         verify_request_data(item)
     except ValueError as e:
         return {'result': 'error', 'message': str(e)}
 
-    try: 
-        with ThreadPoolExecutor() as executor:
-            # Create a new future for the incoming request
-            job_thread = executor.submit(finetune_task, item, config, username)
-            # Run the future and return the result
-            result = job_thread.result()
+    try:
+        result = finetune_task(item, config, username)
     except CancelledError:
-        logger.info("Cancelled /generate execution by a new request.")
+        logger.info("Cancelled /fintune/project execution for a new request.")
         return {'result': 'cancelled'}
 
-    return {'result': 'success'}
+    return result
 
 
 def get_documentation_data(
@@ -107,6 +104,7 @@ def finetune_task(item: ProjectFinetuneData, config: DictConfig, username: str):
         config (DictConfig): The global config.
         username (str): The username of the user.
     """
+    logging.info(f"Finetuning on project for user: {username}.")
     item.libraries = item.libraries or []
 
     # Print the current thread id to show that it is different for each request
@@ -147,7 +145,7 @@ def finetune_task(item: ProjectFinetuneData, config: DictConfig, username: str):
         finetune.train_self_supervised_project(
             model, tokenizer, item.project_dict, config.train,
             output_dir=model_config.save_model_dir, report_to='none',
-            train_methods=train_methods, # TODO: Test train_methods
+            train_methods=train_methods,
         )
 
     # Train on the collected documentation
@@ -173,7 +171,7 @@ def finetune_task(item: ProjectFinetuneData, config: DictConfig, username: str):
                 train_documents.extend(data['text'])
 
             logger.info(f"Training on {len(train_documents)} documents of documentation text")
-            finetune.train_self_supervised_documents( # TODO: Test train_self_supervised_documents
+            finetune.train_self_supervised_documents(
                 model, tokenizer, train_documents, config.train,
                 output_dir=model_config.save_model_dir, report_to='none',
                 train_methods=['ntp'],
@@ -204,13 +202,13 @@ def finetune_task(item: ProjectFinetuneData, config: DictConfig, username: str):
 
             if config.train.train_on_practice_problems:
                 logger.info("Training on practice problems and generating solutions")
-                solutions = train_multi_step_sft_with_verification( # TODO: Test train_sft_with_verification, make sure returned solutions are correct
+                solutions = train_multi_step_sft_with_verification(
                     model, tokenizer, train_problems, config.train,
                     output_dir=model_config.save_model_dir, report_to='none')
                 
             elif config.train.train_on_verified_solutions:
                 logger.info("Generating solutions to practice problems")
-                solutions = generate_solutions( # TODO: Test generate_solutions
+                solutions = generate_solutions(
                     model, tokenizer, train_problems, config.train)
             
             # Train on the verified solutions

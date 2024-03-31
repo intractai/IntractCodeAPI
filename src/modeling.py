@@ -2,6 +2,7 @@ import abc
 from argparse import Namespace
 from concurrent.futures import CancelledError
 import copy
+from functools import partial
 import logging
 import os
 import threading
@@ -18,27 +19,33 @@ import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from transformers import BitsAndBytesConfig
 
+from src.users import SessionTracker
+
 
 logger = logging.getLogger(__name__)
 
-# Create a global variable to store the model
-GLOBAL_GENERATE_THREAD_ID = None
-GLOBAL_FINETUNE_THREAD_ID = None
+# Create a global variable to store the main thread ID
 GLOBAL_MAIN_THREAD_ID = None
 
-EOT_TOKEN = "<|EOT|>"
-FIM_BEGIN_TOKEN = "<｜fim▁begin｜>" # 32016
-FIM_HOLE_TOKEN = "<｜fim▁hole｜>" # 32015
-FIM_END_TOKEN = "<｜fim▁end｜>" # 32017
+EOT_TOKEN = '<|EOT|>'
+FIM_BEGIN_TOKEN = '<｜fim▁begin｜>' # 32016
+FIM_HOLE_TOKEN = '<｜fim▁hole｜>' # 32015
+FIM_END_TOKEN = '<｜fim▁end｜>' # 32017
 
 
-def thread_hook(*args):
+def thread_hook(username, *args):
     current_thread_id = threading.get_ident()
-    if GLOBAL_GENERATE_THREAD_ID is not None \
-        and current_thread_id != GLOBAL_GENERATE_THREAD_ID \
-        and current_thread_id != GLOBAL_FINETUNE_THREAD_ID \
-        and current_thread_id != GLOBAL_MAIN_THREAD_ID:
+
+    session_tracker = SessionTracker.get_instance()
+    activity_threads = session_tracker.get_user_activity_threads(username)
+
+    if current_thread_id not in activity_threads:
         raise CancelledError("Cancelled by new request")
+
+
+def set_main_thread_id():
+    global GLOBAL_MAIN_THREAD_ID
+    GLOBAL_MAIN_THREAD_ID = threading.get_ident()
 
 
 class ModelLoader(abc.ABC):
@@ -98,6 +105,57 @@ class ModelLoader(abc.ABC):
         pass
 
 
+class SynchronizedProxy:
+    """A proxy class that synchronizes method calls on the wrapped object.
+
+    This class is used to synchronize method calls on the tokenizer object
+    because HuggingFace tokenizers can throw issues if they are used concurrently.
+    """
+
+    def __init__(self, instance):
+        """Creates a lock and stores the instance to be wrapped.
+        
+        Args:
+            instance: The instance to be wrapped.
+        """
+        self._lock = threading.Lock()
+        self._instance = instance
+
+    def __getattr__(self, item):
+        attr = getattr(self._instance, item)
+        if callable(attr):
+            def synced_method(*args, **kwargs):
+                with self._lock:
+                    return attr(*args, **kwargs)
+            return synced_method
+        return attr
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        # Remove the lock from the state because it cannot be pickled.
+        del state['_lock']
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        # Reinitialize the lock after unpickling.
+        self._lock = threading.Lock()
+
+    def __deepcopy__(self, memo):
+        # Customize the deepcopy behavior to handle the lock.
+        cls = self.__class__
+        # Create a new instance without calling __init__ (to avoid creating another lock initially).
+        result = cls.__new__(cls)
+        memo[id(self)] = result
+        for k, v in self.__dict__.items():
+            if k == '_lock':
+                # Initialize a new lock for the copied object.
+                setattr(result, k, threading.Lock())
+            else:
+                setattr(result, k, copy.deepcopy(v, memo))
+        return result
+
+
 class StandardModelLoader(ModelLoader):
 
     def load_model(self, device=None) -> Tuple[torch.nn.Module, dict]:
@@ -134,12 +192,9 @@ class StandardModelLoader(ModelLoader):
             device_map=device, torch_dtype=dtype)
         model.to(device)
 
-        for _, md in model.named_modules():
-            md.register_forward_hook(thread_hook)
-
         GLOBAL_MAIN_THREAD_ID = threading.get_ident()
 
-        return model, {'tokenizer': tokenizer}
+        return model, {'tokenizer': SynchronizedProxy(tokenizer)}
 
 
 class LoraModelLoader(ModelLoader):
@@ -315,14 +370,35 @@ class ModelProvider:
         """Create a new model tuple from the base model."""
         model = copy.deepcopy(self._base_model_tuple.model)
         model = model.to(self._target_device)
-        model_utils = self._base_model_tuple.model_utils
+        # We also want to copy the tokenizer because HuggingFace tokenizer may
+        # throw an error if you try to use them concurrently
+        # Previously was having this problem:
+        # https://github.com/huggingface/tokenizers/issues/537
+        model_utils = copy.deepcopy(self._base_model_tuple.model_utils)
         return ModelTuple(model, model_utils)
+    
+    def _register_preemption_hooks(self, model: torch.nn.Module, username: str):
+        """Register hooks that preempt the model if a newer request is made.
+        
+        This allows us to cancel the current request if a new one is made,
+        saving resources and preventing the server from being overwhelmed for
+        requests that are no longer needed.
+        
+        Args:
+            model (torch.Module): The model to register the hooks on.
+            username (str): The username of the user.
+        """
+        for _, md in model.named_modules():
+            md.register_forward_hook(
+                partial(thread_hook, username))
 
     def get_model_tuple(self, username: str) -> ModelTuple:
         """Get the model and model utilities for the user."""
         with self._get_user_lock(username):
             if username not in self._models:
                 self._models[username] = self.create_new_model_tuple()
+                model = self._models[username].model
+                self._register_preemption_hooks(model, username)
             return self._models[username]
 
     def get_model(self, username: str):

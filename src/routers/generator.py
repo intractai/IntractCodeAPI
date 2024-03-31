@@ -1,8 +1,8 @@
+from functools import partial
 import logging
-import threading
 from typing import Annotated, Optional, Union
 
-from concurrent.futures import ThreadPoolExecutor, CancelledError
+from concurrent.futures import CancelledError
 from fastapi import APIRouter, Depends
 from omegaconf import DictConfig
 from pydantic import BaseModel
@@ -41,18 +41,14 @@ class GenerateData(BaseModel):
 def generate(
         item: GenerateData,
         config: Annotated[DictConfig, Depends(config_handler.get_config)],
-        username: Annotated[str, Depends(validate_user_session)],
+        username: Annotated[str, Depends(partial(validate_user_session, activity='generate'))],
     ):
-    # Cancel the current future if it exists
-    try: 
-        with ThreadPoolExecutor() as executor:
-            # Create a new future for the incoming request
-            job_thread = executor.submit(generate_task, item, config, username)
-            # Run the future and return the result
-            result = job_thread.result()
+    # Cancel the current task if a newer one exists
+    try:
+        result = generate_task(item, config, username)
     except CancelledError:
         print("Canceled generation!")
-        logger.info("Cancelled /generate execution by a new request.")
+        logger.info("Cancelled /generate execution for a new request.")
         result = {'error': "Cancelled by new request"}
     return result
 
@@ -77,7 +73,6 @@ def format_input(
     Returns:
         BatchEncoding: The formatted input with input_ids and an attention_mask.
     """
-
     return format_inference_input(
         preceeding_text = item.prior_context,
         tokenizer = tokenizer,
@@ -89,9 +84,7 @@ def format_input(
 
 
 def generate_task(item: GenerateData, config: DictConfig, username: str):
-    # Print the current thread id to show that it is different for each request
-    modeling.GLOBAL_GENERATE_THREAD_ID = threading.get_ident()
-    logger.info(f"Current generate task thread id: {modeling.GLOBAL_GENERATE_THREAD_ID}")
+    logging.info(f"Generating text for user: {username}.")
 
     model = get_model(username)
     tokenizer = get_tokenizer(username)

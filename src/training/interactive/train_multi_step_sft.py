@@ -106,7 +106,7 @@ def revise_batch(
     correct = gather_object(process_correct)
 
     if accelerator.is_main_process:
-        log.info(f"Finished! {sum(correct)}/{len(correct)} correct responses.")
+        log.info(f"Finished! {sum(correct).item()}/{len(correct)} correct responses.")
 
     ### Select incorrect responses for revision ###
 

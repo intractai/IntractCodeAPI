@@ -11,7 +11,6 @@ import torch.distributed
 import transformers
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
-from src import modeling
 from src.training.data_formatting import (
     prepare_fim_train_input,
     prepare_ntp_train_input,
