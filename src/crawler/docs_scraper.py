@@ -1,10 +1,9 @@
 import json
+import re
 import logging
 from datetime import datetime
 from urllib.parse import urlparse
 from pathlib import Path
-import os, sys
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 
 import scrapy
 import html2text
@@ -14,7 +13,8 @@ from src.crawler.utils.docs_finder import find_doc_first_page
 from src.crawler.utils.html_processors import extract_main_text_from_html
 
 html2text.config.MARK_CODE = False
-LATEST_DOCS_KEYWORDS = ['latest', 'stable', 'current', 'master', 'release', 'main', 'default']
+LATEST_DOCS_KEYWORDS = ['latest', 'stable', 'current', 'master', 'release', 'main', 'default', ]
+EXCLUDE_DOCS_KEYWORDS = ['/version']
 
 
 class DocsSpider(scrapy.Spider):
@@ -35,6 +35,9 @@ class DocsSpider(scrapy.Spider):
                 return
             content = extract_main_text_from_html(response.body.decode('utf-8'))
             is_latest_doc = any(keyword in response.url for keyword in LATEST_DOCS_KEYWORDS)
+            has_version = re.search(r'/\d+(\.\d+)+/', response.url)
+            is_old_doc = any(keyword in response.url for keyword in EXCLUDE_DOCS_KEYWORDS)
+
             # This seems like a naive way to extract code blocks from the HTML content
             # but as far as I looked other libraries were doing the same thing
             # we can do more complex things but that's TODO
@@ -43,7 +46,7 @@ class DocsSpider(scrapy.Spider):
                 code_block = self.h.handle(code_block.get())
                 code_blocks.append(code_block)
 
-            if is_latest_doc: 
+            if is_latest_doc or (not has_version and not is_old_doc): 
                 yield {
                     'content': content,
                     'code_blocks': code_blocks,
