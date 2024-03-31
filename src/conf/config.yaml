@@ -6,6 +6,7 @@ session:
   max_active_sessions: 4
   eviction_interval: 120 # Check for idle sessions every 2 minutes
   max_session_idle_time: 600 # Evict sessions that have been idle for 10 minutes
+  max_finetune_threads: 1 # Global maximum number of threads for fine-tuning
 
 database:
   path: "../db.sqlite3"
@@ -17,7 +18,7 @@ model:
   model_dir: ".model/"
   model_name: ${oc.env:MODEL_NAME, deepseek-ai/deepseek-coder-1.3b-base}
   model_type: standard
-  fp16: False 
+  fp16: False
   bf16: False
   context_length: 512
   device: cpu

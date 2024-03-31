@@ -51,7 +51,7 @@ def main(config: DictConfig):
     config_handler.ConfigProvider.initialize(config)
     database.DatabaseProvider.initialize(config.database.path)
     model_provider = ModelProvider.get_instance(config.model)
-    SessionTracker.get_instance(model_provider, **config.session)
+    SessionTracker.get_instance(model_provider, config.session)
 
     # Sets main thread ID
     set_main_thread_id()

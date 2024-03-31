@@ -18,8 +18,11 @@ from src.training.interactive.train_multi_step_sft import (
 from src.users import validate_user_session
 
 
+FINETUNE_THREAD_IDS = set()
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
+global_finetune_lock = threading.Lock()
 
 
 class ProjectFinetuneData(BaseModel):
@@ -41,16 +44,35 @@ def finetune_project(
         config: Annotated[DictConfig, Depends(config_handler.get_config)],
         username: Annotated[str, Depends(partial(validate_user_session, activity='finetune'))],
     ):
+    max_threads = config.session.max_finetune_threads
+    thread_id = threading.get_ident()
+
     try:
         verify_request_data(item)
     except ValueError as e:
         return {'result': 'error', 'message': str(e)}
 
     try:
-        result = finetune_task(item, config, username)
+        started = False
+        if len(FINETUNE_THREAD_IDS) < max_threads:
+            with global_finetune_lock:
+                if len(FINETUNE_THREAD_IDS) < max_threads:
+                    started = True
+                    FINETUNE_THREAD_IDS.add(thread_id)
+
+        if started:
+            result = finetune_task(item, config, username)
+        else:
+            result = {
+                'result': 'error',
+                'message': 'Server training capacity reached. Try again later.'
+            }
     except CancelledError:
         logger.info("Cancelled /fintune/project execution for a new request.")
-        return {'result': 'cancelled'}
+        result = {'result': 'cancelled'}
+    finally:
+        if thread_id in FINETUNE_THREAD_IDS:
+            FINETUNE_THREAD_IDS.remove(thread_id)
 
     return result
 

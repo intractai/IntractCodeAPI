@@ -7,6 +7,7 @@ from typing import Optional, Union
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
+from omegaconf import DictConfig
 from passlib.context import CryptContext
 from pydantic import BaseModel, EmailStr
 
@@ -32,9 +33,7 @@ class SessionTracker:
     def get_instance(
             cls: 'SessionTracker',
             model_provider = None,
-            max_active_sessions: int = 100,
-            eviction_interval: int = 300,
-            max_session_idle_time: int = 600
+            config: DictConfig = None,
         ) -> 'SessionTracker':
         """Get the singleton instance of the session tracker.
 
@@ -50,10 +49,11 @@ class SessionTracker:
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
-                    cls._instance = cls(model_provider, max_active_sessions, eviction_interval, max_session_idle_time)
+                    assert config is not None, "Config must be provided!"
+                    cls._instance = cls(model_provider, config)
         return cls._instance
 
-    def __init__(self, model_provider, max_active_sessions: int, eviction_interval: int, max_session_idle_time: int):
+    def __init__(self, model_provider, config: DictConfig):
         """Initialize the session tracker."""
         if SessionTracker._instance is not None:
             raise Exception("This class is a singleton!")
@@ -61,9 +61,9 @@ class SessionTracker:
             assert model_provider is not None, "Model provider must be provided!"
             SessionTracker._instance = self
             self.model_provider = model_provider
-            self.max_active_sessions = max_active_sessions
-            self.eviction_interval = eviction_interval
-            self.max_session_idle_time = max_session_idle_time
+            self.max_active_sessions = config.max_active_sessions
+            self.eviction_interval = config.eviction_interval
+            self.max_session_idle_time = config.max_session_idle_time
             self.user_last_active = {}
             self._activity_threads = {} # Maps users to a dictionary of threads running for that user
             self._start_eviction_thread()
