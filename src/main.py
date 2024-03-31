@@ -46,7 +46,8 @@ def main(config: DictConfig):
     # Start logging and config
     configure_logging()
     config = OmegaConf.create(config)
-
+    logger.info(f"Loaded config: {config}")
+    
     # Initialize singletons
     config_handler.ConfigProvider.initialize(config)
     database.DatabaseProvider.initialize(config.database.path)
