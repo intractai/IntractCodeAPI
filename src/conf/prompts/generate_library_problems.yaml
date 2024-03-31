@@ -9,24 +9,29 @@ generate_library_problems:
     {{ library_desc|trim }}
     ======
 
-    Different features of the library are shown as bullet points in the given description and there are {{feature_num}} features in total.
+    Different features of the library are shown as bullet points in the given description and there are around {{feature_num}} bullet points in total.
     Start from the first bullet-point, carefully read it, and generate {{problem_num}} distinct code problems for that bullet point. Repeat this process for all bullet points in the given description.
-    Ensure that the problems are challenging and require a deep understanding of the described library features in the given bullet point.
+    Ensure that the problems vary in difficulty and properly evaluate the understanding of the each given library feature.
+    The description of the problem should be concise, limited to one paragraph, and described in plain text without any markdown notations.
+    If any files or outside resources are required for the problem to be solved, a requirement of the problem should be building a dummy version of the file with the given content to make sure that the problem can be properly solved.
 
     The output must be a valid YAML object equivalent to type $CodeProblems, according to the following Pydantic definitions:
     ======
     class CodeProblems(BaseModel):
-        problems: List[str] = Field(description='A list of problems for the given library description' min_items={{problem_num*feature_num}}, max_items={{problem_num*feature_num}})
+        problems: List[str] = Field(description='A list of problems in string format, each considering a bullet point in the given library description' min_items={{problem_num*feature_num}}, max_items={{problem_num*feature_num}})
     ======
 
     Example YAML output:
     ```yaml
     problems: 
-    - 
+    - |
+      Write a function that makes a file called 'example.txt' with the content 'Hello, World!', and then uses the library to process the file and return the number of characters in the file.
+    - |
+      Write a function that uses this capability of the library by getting a list of integers and returning the product of all the elements in the list.
     ...
     ```
 
-    Each YAML output MUST be after a newline, and indented.
+    Each YAML output MUST be after a newline, indented, with block scalar indicator ('|').
 
     Answer:
     ```yaml
