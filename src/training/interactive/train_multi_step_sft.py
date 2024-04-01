@@ -212,17 +212,10 @@ def log_revision_metrics(revisions, config, tokenizer, step=None):
             for sample_idx in sample_idxs - found_idxs:
                 sample_data[sample_idx].extend([None, None, None])
 
-        # Record the ground-truth responses
-        for idx in sample_data:
-            sample_data[idx].append(tokenizer.decode(
-                revisions[0]['gt_response_tensors'][idx], skip_special_tokens=True)
-            )
-
         # Create a table for logging samples
         columns = []
         for i in range(len(revisions)):
             columns.extend([f'r{i}_query', f'r{i}_response', f'r{i}_correct'])
-        columns.append('ground_truth_response')
         sample_table = wandb.Table(columns=columns, data=list(sample_data.values()))
         metrics['train/samples'] = sample_table
         

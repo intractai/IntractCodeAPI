@@ -193,14 +193,17 @@ def finetune_task(item: ProjectFinetuneData, config: DictConfig, username: str):
         if config.train.train_on_docs:
             train_documents = []
             for data in lib_data.values():
-                train_documents.extend(data['text'])
+                train_documents.extend(data['content'])
 
-            logger.info(f"Training on {len(train_documents)} documents of documentation text")
-            finetune.train_self_supervised_documents(
-                model, tokenizer, train_documents, config.train,
-                output_dir=model_config.save_model_dir, report_to='none',
-                train_methods=['ntp'],
-            )
+            if len(train_documents) == 0:
+                logger.info("No documentation content found for training, skipping.")
+            else:
+                logger.info(f"Training on {len(train_documents)} documents of documentation text")
+                finetune.train_self_supervised_documents(
+                    model, tokenizer, train_documents, config.train,
+                    output_dir=model_config.save_model_dir, report_to='none',
+                    train_methods=['ntp'],
+                )
                 
         # Train on the documentation code snippets
 
@@ -209,12 +212,15 @@ def finetune_task(item: ProjectFinetuneData, config: DictConfig, username: str):
             for data in lib_data.values():
                 train_code.extend(data['code'])
 
-            logger.info("Training on documentation code snippets")
-            finetune.train_self_supervised_documents(
-                model, tokenizer, train_code, config.train,
-                output_dir=model_config.save_model_dir, report_to='none',
-                train_methods=train_methods,
-            )
+            if len(train_code) == 0:
+                logger.info("No documentation code snippets found for training, skipping.")
+            else:
+                logger.info("Training on documentation code snippets")
+                finetune.train_self_supervised_documents(
+                    model, tokenizer, train_code, config.train,
+                    output_dir=model_config.save_model_dir, report_to='none',
+                    train_methods=train_methods,
+                )
                 
         # Generate practice problems and ideal solutions
         if require_problems:
@@ -222,29 +228,32 @@ def finetune_task(item: ProjectFinetuneData, config: DictConfig, username: str):
             for data in lib_data.values():
                 train_problems.extend(data['problems'])
 
-            # Can later also add a 'code' field to provide starting code
-            train_problems = {'instruction': train_problems}
+            if len(train_problems) == 0:
+                logger.info("No documentation problems found for training, skipping.")
+            else:
+                # Can later also add a 'code' field to provide starting code
+                train_problems = {'instruction': train_problems}
 
-            if config.train.train_on_practice_problems:
-                logger.info("Training on practice problems and generating solutions")
-                solutions = train_multi_step_sft_with_verification(
-                    model, tokenizer, train_problems, config.train,
-                    output_dir=model_config.save_model_dir, report_to='none')
+                if config.train.train_on_practice_problems:
+                    logger.info("Training on practice problems and generating solutions")
+                    solutions = train_multi_step_sft_with_verification(
+                        model, tokenizer, train_problems, config.train,
+                        output_dir=model_config.save_model_dir, report_to='none')
+                    
+                elif config.train.train_on_verified_solutions:
+                    logger.info("Generating solutions to practice problems")
+                    solutions = generate_solutions(
+                        model, tokenizer, train_problems, config.train)
                 
-            elif config.train.train_on_verified_solutions:
-                logger.info("Generating solutions to practice problems")
-                solutions = generate_solutions(
-                    model, tokenizer, train_problems, config.train)
-            
-            # Train on the verified solutions
-            if config.train.train_on_verified_solutions:
-                # Some solutions will be None if no solution was found
-                solutions = [x for x in solutions if x]
-                finetune.train_self_supervised_documents(
-                    model, tokenizer, solutions, config.train,
-                    output_dir=model_config.save_model_dir, report_to='none',
-                    train_methods=train_methods,
-                )
+                # Train on the verified solutions
+                if config.train.train_on_verified_solutions:
+                    # Some solutions will be None if no solution was found
+                    solutions = [x for x in solutions if x]
+                    finetune.train_self_supervised_documents(
+                        model, tokenizer, solutions, config.train,
+                        output_dir=model_config.save_model_dir, report_to='none',
+                        train_methods=train_methods,
+                    )
 
 
     return {"result": "success"}

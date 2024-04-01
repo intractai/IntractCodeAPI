@@ -32,3 +32,4 @@ trafilatura
 litellm
 tenacity
 beautifulsoup4
+lxml[html_clean]
