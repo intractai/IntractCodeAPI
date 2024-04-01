@@ -235,6 +235,8 @@ def finetune_task(item: ProjectFinetuneData, config: DictConfig, username: str):
             
             # Train on the verified solutions
             if config.train.train_on_verified_solutions:
+                # Some solutions will be None if no solution was found
+                solutions = [x for x in solutions if x]
                 finetune.train_self_supervised_documents(
                     model, tokenizer, solutions, config.train,
                     output_dir=model_config.save_model_dir, report_to='none',

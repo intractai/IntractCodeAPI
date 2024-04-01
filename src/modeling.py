@@ -6,6 +6,7 @@ from functools import partial
 import logging
 import os
 import threading
+import types
 from typing import NamedTuple, Tuple
 
 import bitsandbytes as bnb
@@ -105,30 +106,41 @@ class ModelLoader(abc.ABC):
         pass
 
 
-class SynchronizedProxy:
-    """A proxy class that synchronizes method calls on the wrapped object.
+def make_synchronous_func(tokenizer, lock, source_func):
+    def new_func(*args, **kwargs):
+        with lock:
+            return source_func(*args, **kwargs)
+    return new_func
 
-    This class is used to synchronize method calls on the tokenizer object
-    because HuggingFace tokenizers can throw issues if they are used concurrently.
+
+class SynchronizedTokenizer():
     """
-
-    def __init__(self, instance):
-        """Creates a lock and stores the instance to be wrapped.
+    A synchronized tokenizer class that creates partially synchronous tokenizers
+    to prevent tokenizer concurrency issues.
+    This could probably be made more efficient by allowing multiple encode / decodes
+    at the same time, but just making sure that writes are synchronous with encodes /
+    decodes. For now, the this seems efficient enough.
+    """
         
-        Args:
-            instance: The instance to be wrapped.
-        """
-        self._lock = threading.Lock()
-        self._instance = instance
+    def from_tokenizer(tokenizer):
+        tokenizer._lock = threading.RLock()
 
-    def __getattr__(self, item):
-        attr = getattr(self._instance, item)
-        if callable(attr):
-            def synced_method(*args, **kwargs):
-                with self._lock:
-                    return attr(*args, **kwargs)
-            return synced_method
-        return attr
+        # Take the functions of this class and copy them over to the tokenizer
+        # This allows us to copy the tokenizer
+        for func in ('__getstate__', '__setstate__', '__deepcopy__'):
+            source_func = getattr(SynchronizedTokenizer, func)
+            setattr(tokenizer, func, types.MethodType(source_func, tokenizer))
+
+        # Make these function synchronous with delete and set var functions
+        for func in ('__call__', 'encode', 'decode'):
+            source_func = getattr(tokenizer, func)
+            setattr(tokenizer, func, make_synchronous_func(tokenizer, tokenizer._lock, source_func))
+        
+        for func in ('__setattr__', '__delattr__'):
+            source_func = getattr(tokenizer, func)
+            setattr(tokenizer, func, make_synchronous_func(tokenizer, tokenizer._lock, source_func))
+    
+        return tokenizer
 
     def __getstate__(self):
         state = self.__dict__.copy()
@@ -137,9 +149,9 @@ class SynchronizedProxy:
         return state
 
     def __setstate__(self, state):
-        self.__dict__.update(state)
         # Reinitialize the lock after unpickling.
-        self._lock = threading.Lock()
+        state['_lock'] = threading.RLock()
+        self.__dict__.update(state)
 
     def __deepcopy__(self, memo):
         # Customize the deepcopy behavior to handle the lock.
@@ -150,7 +162,7 @@ class SynchronizedProxy:
         for k, v in self.__dict__.items():
             if k == '_lock':
                 # Initialize a new lock for the copied object.
-                setattr(result, k, threading.Lock())
+                setattr(result, k, threading.RLock())
             else:
                 setattr(result, k, copy.deepcopy(v, memo))
         return result
@@ -194,7 +206,7 @@ class StandardModelLoader(ModelLoader):
 
         GLOBAL_MAIN_THREAD_ID = threading.get_ident()
 
-        return model, {'tokenizer': SynchronizedProxy(tokenizer)}
+        return model, {'tokenizer': SynchronizedTokenizer.from_tokenizer(tokenizer)}
 
 
 class LoraModelLoader(ModelLoader):
