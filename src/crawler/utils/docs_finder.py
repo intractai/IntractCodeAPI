@@ -1,7 +1,7 @@
 from googlesearch import search
 
 
-QUERY_TEMPLATE = "Latest {} library documentation"
+QUERY_TEMPLATE = "Latest {} library documentation website"
 lib_to_doc = {
     'html2text': 'https://html2text.readthedocs.io/en/latest/',
     'pytorch': 'https://pytorch.org/docs/stable/package.html#tutorials'
