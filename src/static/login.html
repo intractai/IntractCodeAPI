@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<body>
+    <form id="loginForm">
+        <label for="username">Username:</label><br>
+        <input type="text" id="username" name="username"><br>
+        <label for="password">Password:</label><br>
+        <input type="password" id="password" name="password"><br>
+        <input type="button" value="Login" onclick="submitForm()">
+    </form> 
+
+    <script>
+        function submitForm() {
+            // Prevent the default form submission
+
+            // Get form data
+            var formData = new FormData(document.getElementById('loginForm'));
+
+            // Create the Fetch request with custom header
+            fetch('/token', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    // Add your custom header here
+                    'Web-Auth': 'True',
+                },
+                body: new URLSearchParams(formData)
+            })
+            .then(response => {
+                if (response.ok) {
+                    return response.json(); // or .text() or .blob() etc.
+                }
+                throw new Error('Network response was not ok.');
+            })
+            .then(data => {
+                console.log(data);
+                // Handle success, redirect or display a message as needed
+            })
+            .catch(error => {
+                console.error('There has been a problem with your fetch operation:', error);
+                // Handle errors here
+            });
+        }
+    </script>
+</body>
+</html>

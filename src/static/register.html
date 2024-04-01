@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Registration Form</title>
+    <style>
+        #responseMessage {
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+
+<h2>Registration Form</h2>
+
+<form id="registrationForm">
+    <label for="username">Username:</label><br>
+    <input type="text" id="username" name="username" required><br>
+    <label for="email">Email:</label><br>
+    <input type="email" id="email" name="email" required><br>
+    <label for="password">Password:</label><br>
+    <input type="password" id="password" name="password" required><br><br>
+    <input type="submit" value="Register">
+</form>
+<div id="responseMessage"></div>
+
+<script>
+document.getElementById('registrationForm').addEventListener('submit', function(event) {
+    event.preventDefault(); // Prevent the form from submitting in the traditional way
+
+    const formData = {
+        username: document.getElementById('username').value,
+        email: document.getElementById('email').value,
+        password: document.getElementById('password').value,
+    };
+
+    const responseMessageElement = document.getElementById('responseMessage');
+
+    fetch('/register/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(formData),
+    })
+    .then(response => response.json().then(data => ({ status: response.status, body: data })))
+    .then(result => {
+        if (result.status >= 200 && result.status < 300) {
+            console.log('Success:', result.body);
+            document.getElementById('registrationForm').style.display = 'none'; // Hide the form
+            responseMessageElement.innerHTML = '<p>Registration successful!</p>'; // Show success message
+        } else {
+            throw new Error(result.body.detail); // Use the detail from the response body
+        }
+    })
+    .catch((error) => {
+        console.error('Error:', error);
+        responseMessageElement.innerHTML = `<p style="color: red;">${error.message}</p>`; // Show error message with detail
+    });
+});
+</script>
+
+</body>
+</html>

@@ -7,6 +7,7 @@ import hydra
 import uvicorn
 from omegaconf import DictConfig, OmegaConf
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 sys.path.append('../')
 from src import config_handler, database
@@ -56,6 +57,9 @@ def main(config: DictConfig):
 
     # Sets main thread ID
     set_main_thread_id()
+
+    # Assuming your HTML files are in a directory named 'static'
+    app.mount('/static', StaticFiles(directory='static'), name='static')
 
     # Include routers
     app.include_router(auth.router)
