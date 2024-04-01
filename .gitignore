@@ -168,3 +168,7 @@ deprecated/**/data/
 src/outputs/
 **.txt
 **.sqlite3
+
+# scrapped data
+scrapped_docs/*
+llms/*

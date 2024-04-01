@@ -1,6 +1,7 @@
 transformers==4.38.2
 fastapi==0.108.0
 torch==2.2.1
+jax
 pydantic[email]==2.5.3
 uvicorn[standard]==0.20.0
 datasets==2.16.1
@@ -24,3 +25,10 @@ python-jose==3.3.0
 passlib==1.7.4
 python-multipart==0.0.5
 wandb==0.16.0
+googlesearch-python
+scrapy
+html2text
+trafilatura
+litellm
+tenacity
+beautifulsoup4
