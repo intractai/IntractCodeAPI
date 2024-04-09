@@ -1,0 +1,99 @@
+.container {
+  display: flex;
+  border: 1px solid black;
+  gap: 20px; /* Gap between columns */
+  max-width: 1200px; /* Adjust the max-width as needed */
+  margin: auto; /* Center the container */
+}
+
+.left-column, .right-column {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid black;
+  max-width: 50%; /* Limiting each column to half of the container's width */
+  height: 600px; /* Fixed height for both columns. Adjust as needed. */
+  overflow: auto; /* Add scroll if content exceeds column height */
+}
+
+.right-column {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 600px; /* Ensuring the right column has a fixed height */
+  overflow: auto; /* Allows scrolling if the content exceeds the column height */
+}
+
+/* Adjustments for spacing and layout */
+#language-selector, #libraries-box {
+  margin-bottom: 20px;
+}
+
+#libraries-box {
+  padding: 20px;
+  background-color: #f9f9f9;
+  border: 1px solid grey; /* Adding a gray border */
+  flex-grow: 1; /* Makes the libraries box expand to fill the available space */
+  overflow: auto; /* Allows scrolling within the libraries box if content exceeds its height */
+}
+
+/* Removing the border around the treeView and adjust padding if needed */
+#treeView {
+  padding-top: 2em;
+  padding-right: 0.1em;
+  padding-bottom: 3em;
+  overflow: auto;
+  white-space: nowrap;
+  border: none; /* Remove the border */
+}
+#treeView span {
+  display: inline-flex;
+  vertical-align: middle;
+  padding-left: 0.3em;
+  font-size: 1.1rem;
+}
+#treeView i {
+  display: inline-flex;
+  vertical-align: middle;
+}
+
+/* File */
+.file {
+  position: relative;
+  display: block;
+  cursor: pointer;
+}
+
+.file:hover {
+  background-color: #ccc;
+}
+
+/* Folder */
+.folder {
+  display: block;
+}
+.folder-header {
+  position: relative;
+  cursor: pointer;
+  /* z-index: 999; */
+}
+
+.folder-header:hover {
+  background-color: #ccc;
+}
+.folder > ul {
+  padding-left: 1em;
+  margin: 0;
+}
+
+.hide {
+  display: none;
+}
+
+  /* Make checkbox a little bigger and center it */
+.item-checkbox {
+    width: 15px;
+    height: 15px;
+}
+

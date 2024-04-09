@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <div class="container">
+        <div class="left-column">
+            <input type="file" webkitdirectory multiple id="directory-picker">
+            <div class="col s12 m4" id="treeView">
+                <!-- Tree view goes here -->
+            </div>
+        </div>
+        
+        <div class="right-column">
+            <div id="language-selector">
+                <select id="language-dropdown">
+                    <option value="python">Python</option>
+                </select>
+                <button id="add-language">Add Language</button>
+            </div>
+
+            <div id="libraries-box">
+                <!-- Libraries box content goes here -->
+            </div>
+
+            <button id="confirm-btn">Confirm</button>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+    <script src="file_selector.js"></script>
+
+</body>
+</html>
