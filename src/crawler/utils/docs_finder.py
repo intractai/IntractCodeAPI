@@ -19,26 +19,26 @@ def find_doc_first_page(library: str, language: Optional[str], model_name: Optio
 
     if model_name:
         urls = list(search(query, sleep_interval=0, num_results=5, advanced=False, lang='en'))
-        # system_content = f"Your job is to find the documentation for the {library} library."
+        system_content = f"You find documentation relevant to specific libraries."
         user_content = [f"{i}: {url}\n" for i, url in enumerate(urls, 1)]
         user_content = ''.join(user_content)
         user_content += \
-            f"Select the link that is most likely to have the best {language} " + \
+            f"Select the link that is most likely to have the best " + \
             f"documentation for the {library} library. " + \
             f"Respond with only a number 1-5, or with NA if none of the links are relevant."
 
         response = completion(
             model = model_name, 
             messages = [
-                # {"content": system_content, "role": "system"},
+                {"content": system_content, "role": "system"},
                 {"content": user_content, "role": "user"},
             ],
         )
         content = response.choices[0].message.content
 
-        if content.lower().startswith == 'na':
+        if content.lower().startswith('na'):
             return None
-        elif content[0].isdigit() and 1 <= int(content) <= 5:
+        elif content[0].isdigit() and 1 <= int(content[0]) <= 5:
             return urls[int(content[0]) - 1]
         elif content in urls:
             return content
