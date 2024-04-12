@@ -7,10 +7,12 @@ import yaml
 from litellm import completion
 from tenacity import retry, stop_after_attempt, wait_fixed
 
-from src.crawler.bfs_scraper import bfs_scrapper
+from src.crawler.docs_scraper import get_docs_overview
 from src import config_handler
 
+
 logger = logging.getLogger(__name__)
+
 
 class AutoDataGenerator(ABC):
 
@@ -37,7 +39,7 @@ class LibraryProblemGenerator(AutoDataGenerator):
         self._model_name = model_name
         self._lang = lang
         self._library = library
-        self._max_chars = max_chars
+        self._max_chars = max_chars #TODO: not used for now.
         self._feature_num = feature_num
         self._problem_num_per_bullet_point = problem_num_per_bullet_point
 
@@ -84,13 +86,10 @@ class LibraryProblemGenerator(AutoDataGenerator):
 
     def generate(self):
         cfg = config_handler.get_config()
-        doc_info = bfs_scrapper(self._library, self._max_chars)
-        logger.debug(f"FINISHED: Extracting {self._library} documentation information.")
+        doc_info = get_docs_overview(self._library)
+        logger.info(f"FINISHED: Extracting {self._library} documentation information.")
         doc_desc = self._generate_doc_description(cfg['describe_library_doc'], doc_info)
-        logger.debug(f"FINISHED: Generating {self._library} description.")
+        logger.info(f"FINISHED: Generating {self._library} description.")
         problems = self._generate_problems_description(cfg['generate_library_problems'], doc_desc)
-        logger.debug(f"FINISHED: Generating {self._library} problems.")
+        logger.info(f"FINISHED: Generating {self._library} problems.")
         return problems
-
-
-

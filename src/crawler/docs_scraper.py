@@ -1,13 +1,23 @@
+from typing import Generator
 import json
 import re
 import logging
+import tempfile
+import os
+import time
+import requests
+import threading
 from datetime import datetime
-from urllib.parse import urlparse
 from pathlib import Path
+from queue import Queue
+from abc import ABC, abstractmethod
 
 import scrapy
 import html2text
+import git
 from scrapy.crawler import CrawlerProcess
+from urllib.parse import urlparse, urljoin
+from bs4 import BeautifulSoup
 
 from src.crawler.utils.docs_finder import find_doc_first_page
 from src.crawler.utils.html_processors import extract_main_text_from_html
@@ -15,6 +25,51 @@ from src.crawler.utils.html_processors import extract_main_text_from_html
 html2text.config.MARK_CODE = False
 LATEST_DOCS_KEYWORDS = ['latest', 'stable', 'current', 'master', 'release', 'main', 'default', ]
 EXCLUDE_DOCS_KEYWORDS = ['/version']
+DOC_EXTENSIONS_ON_GITHUB = ('.md', '.rst', '.txt', '.html')
+MAX_OVERVIEW_TOKENS = 10000
+
+#TODO: all languages are not supported; we also need to think about what 
+# we're going to do with text files, json files, and so on when we're dealing with a repo
+LANG_TO_EXT = { 
+    'python': '.py',
+    'javascript': '.js',
+    'typescript': '.ts',
+    'java': '.java',
+    'c': '.c',
+    'c++': '.cpp',
+    'c#': '.cs',
+    'go': '.go',
+    'php': '.php',
+    'ruby': '.rb',
+    'rust': '.rs',
+    'kotlin': '.kt',
+    'swift': '.swift',
+    'dart': '.dart',
+    'r': '.r',
+    'scala': '.scala',
+    'shell': '.sh',
+    'bash': '.sh',
+    'powershell': '.ps1',
+    'perl': '.pl',
+    'lua': '.lua',
+    'html': '.html',
+    'css': '.css',
+    'scss': '.scss',
+    'sass': '.sass',
+    'less': '.less',
+    'stylus': '.styl',
+    'sql': '.sql',
+    'dockerfile': 'Dockerfile',
+}
+
+
+logger = logging.getLogger(__name__)
+
+
+def _delete_file_after_1_hour(temp_file_path: Path) -> None:
+    time.sleep(3600)  # Wait for 1 hour
+    if temp_file_path.exists():
+        os.remove(temp_file_path)
 
 
 class DocsSpider(scrapy.Spider):
@@ -29,7 +84,7 @@ class DocsSpider(scrapy.Spider):
         self.h = html2text.HTML2Text()
         self.h.ignore_links = True
 
-    def parse(self, response):
+    def parse(self, response: scrapy.http.Response) -> Generator[dict, None, None]:
         try:
             if 'text/html' not in response.headers.get('Content-Type').decode('utf-8'):
                 return
@@ -69,44 +124,205 @@ class DocsSpider(scrapy.Spider):
                 yield scrapy.Request(link, callback=self.parse)
 
 
-def _format_properly(spider_output: list[dict]) -> dict:
-    result_dict = {'content': [], 'code': []}
-    for item in spider_output:
-        result_dict['content'].append(item['content'])
-        result_dict['code'].extend(item['code_blocks'])
-    return result_dict
+class Scraper(ABC):
+
+    def __init__(self, start_urls: list, file_path: Path = None):
+        self._start_urls = start_urls
+        self._file_path = self._create_file_path(file_path)
+
+    def _create_file_path(self, file_path: Path):
+        if file_path is None:
+            file_path = Path(tempfile.mktemp().replace('\\', '/'))
+            threading.Thread(target=_delete_file_after_1_hour, args=(file_path,)).start()
+            
+        # check if the file path is a directory
+        assert not file_path.is_dir(), "The file path should not be a directory."
+
+        # create the directory to file path if it does not exist
+        if not file_path.parent.exists():
+            logger.info(f"Creating directory: {file_path.parent}")
+            file_path.parent.mkdir()
+
+        return Path(file_path)
+    
+    def _save_to_db(self, data: dict):
+        """Saving the documentation into the database
+
+        Args:
+            data (dict): the output dictionary is in this format:
+            {
+                'content': [list of all the content extracted from the documentation],
+                'code': [list of all the code blocks extracted from the documentation]
+            }
+        """
+        pass #TODO: to be implemented in the future
+    
+    @abstractmethod
+    def scrape(self) -> dict:
+        pass
 
 
-def _get_doc_data_by_url(doc_url: str, file_path: Path = None) -> dict:
-    """extracts the content and code blocks from the documentation
+class GithubScraper(Scraper):
+    
+    def _clone_repo(self, repo_url: str, target_path: str) -> bool:
+        try:
+            git.Repo.clone_from(repo_url, target_path)
+            return True
+        except Exception as e:
+            logger.warning(f"Error cloning {repo_url}: {e}")
+            return False
 
-    Args:
-        doc_url (str): _description_
-
-    Returns:
-        dict: the output dictionary is in this format:
-        {
-            'content': [list of all the content extracted from the documentation],
-            'code': [list of all the code blocks extracted from the documentation]
+    def scrape(self, limit_tokens: bool = False) -> dict:
+        """
+        Use BFS to search through the given github repository and 
+        extract the content and code blocks from the documentation
+        """
+        repo_url = self._start_urls[0] #TODO: this is just temporary until I implement the logic to do it for multiple repos
+        target_dir = self._file_path
+        self._clone_repo(repo_url, target_dir)
+        docs = {
+            'content': [],
+            'code': []
         }
-    """
-    # generate a unique id based on the date and a unique identifier
-    dir_name = Path('scrapped_docs')
-    if not dir_name.exists():
-        dir_name.mkdir()
-    if not file_path:
-        file_path = dir_name/f'output_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json'
+        docs_token_count = 0
+        queue = Queue()
+        root_path = Path(target_dir)
 
-    process = CrawlerProcess({
-        'USER_AGENT': 'Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 5.1)',
-        'FEED_FORMAT': 'json', 
-        'FEED_URI': file_path,
-        'LOG_LEVEL': 'ERROR'
-    })
-    process.crawl(DocsSpider, start_urls=[doc_url])
-    process.start()
+        queue.put(root_path)
 
-    return _format_properly(json.load(open(file_path)))
+        while not queue.empty():
+            current_path = queue.get()
+            for entry in current_path.iterdir():
+                if entry.is_dir():
+                    queue.put(entry)
+                # TODO: need to add ability to extract code blocks from the documentation files
+                elif entry.suffix in DOC_EXTENSIONS_ON_GITHUB:
+                    try:
+                        content = entry.read_text(encoding='utf-8')
+                        docs['content'].append(content)
+                        docs_token_count += len(content)
+                        if limit_tokens and docs_token_count >= MAX_OVERVIEW_TOKENS:
+                            return {'overview': '\n\n'.join(docs['content'])[:MAX_OVERVIEW_TOKENS]}
+                    except Exception as e:
+                        print(f"Error reading {entry}: {e}")
+                # TODO: limit_tokens is a nasty hack; need to refactor this later
+                elif entry.suffix in LANG_TO_EXT.values() and not limit_tokens:
+                    try:
+                        content = entry.read_text(encoding='utf-8')
+                        docs['code'].append(content)
+                    except Exception as e:
+                        print(f"Error reading {entry}: {e}")
+
+        self._save_to_db(docs)
+
+        if limit_tokens:
+            if docs_token_count <= 10:
+                raise ValueError('Content is too short')
+            return {'overview': '\n\n'.join(docs['content'])}
+
+        return docs
+
+
+class AsyncDocsScraper(Scraper):
+
+    def _format_properly(self, spider_output: list[dict]) -> dict:
+        result_dict = {'content': [], 'code': []}
+        for item in spider_output:
+            result_dict['content'].append(item['content'])
+            result_dict['code'].extend(item['code_blocks'])
+        return result_dict
+    
+    def scrape(self):
+        """extracts the content and code blocks from the documentation
+
+        Args:
+            doc_url (str): _description_
+
+        Returns:
+            dict: the output dictionary is in this format:
+            {
+                'content': [list of all the content extracted from the documentation],
+                'code': [list of all the code blocks extracted from the documentation]
+            }
+        """
+        file_path = self._file_path
+        
+        process = CrawlerProcess({
+            'USER_AGENT': 'Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 5.1)',
+            'FEED_FORMAT': 'json', 
+            'FEED_URI': file_path,
+            'LOG_LEVEL': 'ERROR'
+        })
+        process.crawl(DocsSpider, start_urls=self._start_urls)
+        process.start()
+
+        with open(file_path, 'r') as f:
+            data = json.load(f)
+
+        self._save_to_db(data)
+
+        return self._format_properly(data)
+    
+
+class SyncDocsScraper(Scraper):
+
+    def scrape(self):
+        """extracts the content and code blocks from the documentation
+
+        Returns:
+            dict: the output dictionary is in this format:
+            {
+                'overview': [list of all the content extracted from the documentation],
+            }
+        """
+        start_url = self._start_urls[0] #TODO: this is just temporary until I implement the logic to do it for multiple repos
+        queue = [start_url]
+        visited = set()
+        content = ''
+
+        allowed_domains = [urlparse(start_url).netloc]
+
+        while queue:
+            current_url = queue.pop(0)
+            if current_url in visited:
+                continue
+
+            # Check if the URL is in the allowed domains
+            url_domain = urlparse(current_url).netloc
+            if url_domain not in allowed_domains:
+                continue
+
+            logging.info(f"Visiting: {current_url}")
+            logging.info(f"Char number progress: {len(content)}/{MAX_OVERVIEW_TOKENS}")
+            visited.add(current_url)
+
+            # Fetch the content of the URL
+            try:
+                response = requests.get(current_url)
+                if response.status_code != 200:
+                    continue
+                
+                page_content = extract_main_text_from_html(response.content.decode('utf-8'))
+                soup = BeautifulSoup(response.text, 'lxml')
+
+                content += page_content + '\n\n'
+                if len(content) >= MAX_OVERVIEW_TOKENS:
+                    return content
+
+                # Find all links and add them to the queue if not visited
+                for link in soup.find_all('a', href=True):
+                    absolute_link = urljoin(current_url, link['href'])
+                    if absolute_link not in visited:
+                        queue.append(absolute_link)
+
+            except Exception as e:
+                print(f"Failed to fetch {current_url}: {str(e)}")
+            
+        # Validating the content length
+        if len(content) < 5:
+            raise ValueError('Content is too short')
+            
+        return content
 
 
 def get_doc_data(library: str) -> dict:
@@ -123,7 +339,29 @@ def get_doc_data(library: str) -> dict:
         }
     """
     url = find_doc_first_page(library)
-    return _get_doc_data_by_url(url)
+    print(f"[get_docs_data] Found documentation URL: {url}")
+
+    if '//github.com/' in url:
+        return GithubScraper([url]).scrape()
+    return AsyncDocsScraper([url]).scrape()
+    
+
+def get_docs_overview(library: str) -> str:
+    """extracts the content from the documentation given library name
+
+    Args:
+        library (str): name of the library
+        max_tokens (int): maximum number of tokens to extract
+
+    Returns:
+        str: the content extracted from the documentation
+    """
+    url = find_doc_first_page(library)
+    print(f"[get_docs_overview] Found documentation URL: {url}")
+
+    if '//github.com/' in url:
+        return GithubScraper([url]).scrape(limit_tokens=True)
+    return SyncDocsScraper([url]).scrape()
 
 
 if __name__ == '__main__':
