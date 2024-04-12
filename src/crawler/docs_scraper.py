@@ -344,6 +344,9 @@ class SyncDocsScraper(Scraper):
                 content.append(page_content)
                 if char_count >= MAX_OVERVIEW_TOKENS and limit_tokens:
                     return '\n\n'.join(content)
+                
+                code_blocks = soup.find_all('pre')
+                print('code_blocks:', code_blocks)
 
                 # Find all links and add them to the queue if not visited
                 for link in soup.find_all('a', href=True):
@@ -360,7 +363,10 @@ class SyncDocsScraper(Scraper):
             
         if limit_tokens:
             return '\n\n'.join(content)
-        return content
+        return {
+            'content': content,
+            'code': []
+        }
 
 
 def get_doc_data(library: str, language: Optional[str]) -> dict:
