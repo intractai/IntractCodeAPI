@@ -270,7 +270,7 @@ class AsyncDocsScraper(Scraper):
             'LOG_LEVEL': 'ERROR'
         })
         process.crawl(DocsSpider, start_urls=self._start_urls)
-        process.start()
+        process.start(install_signal_handlers=False)
 
         with open(file_path, 'r') as f:
             data = json.load(f)
