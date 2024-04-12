@@ -73,7 +73,6 @@ def _delete_file_after_1_hour(temp_file_path: Path) -> None:
 
 class DocsSpider(scrapy.Spider):
     name = 'docs'
-    AUTOTHROTTLE_ENABLED = True
 
     def __init__(self, start_urls: list, *args, **kwargs):
         super(DocsSpider, self).__init__(*args, **kwargs)
@@ -326,6 +325,7 @@ class SyncDocsScraper(Scraper):
             print(f"Visiting: {current_url}")
             if limit_tokens:
                 logging.debug(f"Char number progress: {char_count}/{MAX_OVERVIEW_TOKENS}")
+                print(f"Char number progress: {char_count}/{MAX_OVERVIEW_TOKENS}")
             visited.add(current_url)
 
             # Fetch the content of the URL
