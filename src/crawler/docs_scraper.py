@@ -1,3 +1,4 @@
+import multiprocessing
 from typing import Generator, Optional
 import json
 import re
@@ -6,8 +7,6 @@ import tempfile
 import os
 import time
 import requests
-import threading
-from datetime import datetime
 from pathlib import Path
 from queue import Queue
 from abc import ABC, abstractmethod
@@ -248,6 +247,20 @@ class AsyncDocsScraper(Scraper):
             result_dict['code'].extend(item['code_blocks'])
         return result_dict
     
+    def run_crawler(self, queue: multiprocessing.Queue, start_urls: list, file_path: Path):
+        process = CrawlerProcess({
+            'USER_AGENT': 'Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 5.1)',
+            'FEED_FORMAT': 'json',
+            'FEED_URI': file_path,
+            'LOG_LEVEL': 'ERROR',
+            'COMPRESSION_ENABLED': 'False',
+        })
+        process.crawl(DocsSpider, start_urls=start_urls)
+        process.start(install_signal_handlers=False)
+        with open(file_path, 'r') as f:
+            data = json.load(f)
+        queue.put(data)
+
     def scrape(self):
         """extracts the content and code blocks from the documentation
 
@@ -262,15 +275,15 @@ class AsyncDocsScraper(Scraper):
             }
         """
         file_path = self._file_path
-        
-        process = CrawlerProcess({
-            'USER_AGENT': 'Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 5.1)',
-            'FEED_FORMAT': 'json', 
-            'FEED_URI': file_path,
-            'LOG_LEVEL': 'ERROR'
-        })
-        process.crawl(DocsSpider, start_urls=self._start_urls)
-        process.start(install_signal_handlers=False)
+        queue = multiprocessing.Queue()
+
+        # Make this happen in a different process because it can only be done once
+        # per process as part of the way it's designed.
+        process = multiprocessing.Process(
+            target=self.run_crawler, args=(queue, self._start_urls, file_path))
+        process.start()
+        process.join()
+        data = queue.get()
 
         with open(file_path, 'r') as f:
             data = json.load(f)

@@ -114,6 +114,10 @@ def get_documentation_data(
         Dict[str, List[str]]: The documentation data.
     """
     return_data = get_doc_data(library, lang)
+    
+    # Remove duplicate strings
+    return_data['content'] = list(set(return_data['content']))
+    return_data['code'] = list(set(return_data['code']))
 
     if gen_problems:
         lib_problem_generator = LibraryProblemGenerator(model, lang, library, max_char_count,
