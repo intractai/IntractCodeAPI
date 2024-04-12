@@ -314,7 +314,7 @@ class SyncDocsScraper(Scraper):
         allowed_domains = [urlparse(start_url).netloc]
 
         while queue and page_count < 30:
-            page_count += 1
+            
             current_url = queue.pop(0)
             if current_url in visited:
                 continue
@@ -336,6 +336,8 @@ class SyncDocsScraper(Scraper):
                 response = requests.get(current_url)
                 if response.status_code != 200:
                     continue
+                else:
+                    page_count += 1
                 
                 page_content = extract_main_text_from_html(response.content.decode('utf-8'))
                 char_count += len(page_content)
