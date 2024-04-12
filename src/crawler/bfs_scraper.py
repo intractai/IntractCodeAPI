@@ -60,12 +60,12 @@ def _bfs_scrapper(start_url: str, max_char_count: int = 10000) -> str:
     return content
 
 
-def bfs_scrapper(library: str, max_char_count: int = 10000) -> str:
+def bfs_scrapper(library: str, language: str = '', max_char_count: int = 10000) -> str:
     """
     library: str
     max_char_count: int
     """
-    url = find_doc_first_page(library)
+    url = find_doc_first_page(library, language)
     return _bfs_scrapper(url, max_char_count)
 
 

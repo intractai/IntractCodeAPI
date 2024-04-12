@@ -12,9 +12,10 @@ lib_to_doc = {
 }
 
 
-def find_doc_first_page(library: str, language: Optional[str], model_name: Optional[str] = 'gpt-3.5-turbo'):
+def find_doc_first_page(library: str, language: str = '', model_name: Optional[str] = 'gpt-3.5-turbo'):
     if library in lib_to_doc:
         return lib_to_doc[library]
+    
     query = QUERY_TEMPLATE.format(library=library, language=language)
 
     if model_name:

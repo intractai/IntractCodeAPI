@@ -4,6 +4,7 @@ import logging
 from datetime import datetime
 from urllib.parse import urlparse
 from pathlib import Path
+from typing import Optional
 
 import scrapy
 import html2text
@@ -22,17 +23,32 @@ class DocsSpider(scrapy.Spider):
 
     def __init__(self, start_urls: list, *args, **kwargs):
         super(DocsSpider, self).__init__(*args, **kwargs)
-        assert start_urls, 'start_urls is required'
+        if len(start_urls) != 1:
+            raise ValueError('Exactly one URL is allowed!')
 
         self.start_urls = start_urls
         self.allowed_domains = [urlparse(url).netloc for url in start_urls]
+        self.allowed_paths = set(self.get_allowed_paths(start_urls[0]))
         self.h = html2text.HTML2Text()
         self.h.ignore_links = True
+
+    def get_allowed_paths(self, url):
+        """If the URL is from GitHub, return the path for the specific project."""
+        if url.startswith('https://github.com'):
+            # First check if the path has the format /user/repo
+            path = urlparse(url).path
+            if path.count('/') == 2:
+                return [path]
+            else:
+                logging.warning(f"Starting GitHub URL {url} is not in the expected format /user/repo")
+
+        return []
 
     def parse(self, response):
         try:
             if 'text/html' not in response.headers.get('Content-Type').decode('utf-8'):
                 return
+            logging.info(f"Extracting content from: {response.url}")
             content = extract_main_text_from_html(response.body.decode('utf-8'))
             is_latest_doc = any(keyword in response.url for keyword in LATEST_DOCS_KEYWORDS)
             has_version = re.search(r'/\d+(\.\d+)+/', response.url)
@@ -63,10 +79,10 @@ class DocsSpider(scrapy.Spider):
             
         for link in links:
             # check if LATEST_DOCS_KEYWORDS are in the link
-            
             if link and not link.startswith('http'):
-                link = response.urljoin(link)
-                yield scrapy.Request(link, callback=self.parse)
+                if not self.allowed_paths or any(link.startswith(path) for path in self.allowed_paths):
+                    link = response.urljoin(link)
+                    yield scrapy.Request(link, callback=self.parse)
 
 
 def _format_properly(spider_output: list[dict]) -> dict:
@@ -109,7 +125,7 @@ def _get_doc_data_by_url(doc_url: str, file_path: Path = None) -> dict:
     return _format_properly(json.load(open(file_path)))
 
 
-def get_doc_data(library: str) -> dict:
+def get_doc_data(library: str, language: Optional[str]) -> dict:
     """extracts the content and code blocks from the documentation given library name
 
     Args:
@@ -122,7 +138,7 @@ def get_doc_data(library: str) -> dict:
             'code': [list of all the code blocks extracted from the documentation]
         }
     """
-    url = find_doc_first_page(library)
+    url = find_doc_first_page(library, language)
     return _get_doc_data_by_url(url)
 
 

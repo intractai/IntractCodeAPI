@@ -24,7 +24,7 @@ class AutoDataGenerator(ABC):
             messages=[
                 {"content": system_content, "role": "system"},
                 {"content": user_content, "role": "user"},
-                ],
+            ],
             temperature=temperature
         )
         return response.choices[0].message.content
@@ -84,7 +84,7 @@ class LibraryProblemGenerator(AutoDataGenerator):
 
     def generate(self):
         cfg = config_handler.get_config()
-        doc_info = bfs_scrapper(self._library, self._max_chars)
+        doc_info = bfs_scrapper(self._library, self._lang, self._max_chars)
         logger.debug(f"FINISHED: Extracting {self._library} documentation information.")
         doc_desc = self._generate_doc_description(cfg['describe_library_doc'], doc_info)
         logger.debug(f"FINISHED: Generating {self._library} description.")
