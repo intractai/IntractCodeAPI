@@ -12,6 +12,7 @@ lib_to_doc = {
     'pytorch': 'https://pytorch.org/docs/stable/package.html#tutorials'
 }
 
+
 def _reduce_github_url(url: str) -> str:
     match = re.match(r'(https://github\.com/[^/]+/[^/]+)', url)
     if match:
@@ -24,6 +25,7 @@ def _format_url(url: str) -> str:
     if '/github.com/' in url:
         url = _reduce_github_url(url)
     return url
+
 
 def find_doc_first_page(library: str, language: str = '', model_name: Optional[str] = 'gpt-3.5-turbo'):
     if library in lib_to_doc:

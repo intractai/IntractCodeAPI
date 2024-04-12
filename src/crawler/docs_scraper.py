@@ -74,6 +74,7 @@ def _delete_file_after_1_hour(temp_file_path: Path) -> None:
 
 class DocsSpider(scrapy.Spider):
     name = 'docs'
+    AUTOTHROTTLE_ENABLED = True
 
     def __init__(self, start_urls: list, *args, **kwargs):
         super(DocsSpider, self).__init__(*args, **kwargs)
@@ -148,7 +149,7 @@ class Scraper(ABC):
     def _create_file_path(self, file_path: Path):
         if file_path is None:
             file_path = Path(tempfile.mktemp().replace('\\', '/'))
-            threading.Thread(target=_delete_file_after_1_hour, args=(file_path,)).start()
+            # threading.Thread(target=_delete_file_after_1_hour, args=(file_path,)).start()
             
         # check if the file path is a directory
         assert not file_path.is_dir(), "The file path should not be a directory."
@@ -281,7 +282,7 @@ class AsyncDocsScraper(Scraper):
 
 class SyncDocsScraper(Scraper):
 
-    def scrape(self):
+    def scrape(self, limit_tokens: bool = False):
         """extracts the content and code blocks from the documentation
 
         Returns:
@@ -293,7 +294,8 @@ class SyncDocsScraper(Scraper):
         start_url = self._start_urls[0] #TODO: this is just temporary until I implement the logic to do it for multiple repos
         queue = [start_url]
         visited = set()
-        content = ''
+        content = []
+        char_count = 0
 
         allowed_domains = [urlparse(start_url).netloc]
 
@@ -307,8 +309,10 @@ class SyncDocsScraper(Scraper):
             if url_domain not in allowed_domains:
                 continue
 
-            logging.info(f"Visiting: {current_url}")
-            logging.info(f"Char number progress: {len(content)}/{MAX_OVERVIEW_TOKENS}")
+            logging.debug(f"Visiting: {current_url}")
+            print(f"Visiting: {current_url}")
+            if limit_tokens:
+                logging.debug(f"Char number progress: {char_count}/{MAX_OVERVIEW_TOKENS}")
             visited.add(current_url)
 
             # Fetch the content of the URL
@@ -318,11 +322,12 @@ class SyncDocsScraper(Scraper):
                     continue
                 
                 page_content = extract_main_text_from_html(response.content.decode('utf-8'))
+                char_count += len(page_content)
                 soup = BeautifulSoup(response.text, 'lxml')
 
-                content += page_content + '\n\n'
-                if len(content) >= MAX_OVERVIEW_TOKENS:
-                    return content
+                content.append(page_content)
+                if char_count >= MAX_OVERVIEW_TOKENS and limit_tokens:
+                    return '\n\n'.join(content)
 
                 # Find all links and add them to the queue if not visited
                 for link in soup.find_all('a', href=True):
@@ -334,9 +339,11 @@ class SyncDocsScraper(Scraper):
                 print(f"Failed to fetch {current_url}: {str(e)}")
             
         # Validating the content length
-        if len(content) < 5:
+        if char_count < 5:
             raise ValueError('Content is too short')
             
+        if limit_tokens:
+            return '\n\n'.join(content)
         return content
 
 
@@ -376,7 +383,7 @@ def get_docs_overview(library: str, language: Optional[str]) -> str:
 
     if '//github.com/' in url:
         return GithubScraper([url]).scrape(limit_tokens=True)
-    return SyncDocsScraper([url]).scrape()
+    return SyncDocsScraper([url]).scrape(limit_tokens=True)
 
 
 if __name__ == '__main__':

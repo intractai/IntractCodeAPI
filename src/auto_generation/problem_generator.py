@@ -86,7 +86,7 @@ class LibraryProblemGenerator(AutoDataGenerator):
 
     def generate(self):
         cfg = config_handler.get_config()
-        doc_info = get_docs_overview(self._library)
+        doc_info = get_docs_overview(self._library, self._lang)
         logger.info(f"FINISHED: Extracting {self._library} documentation information.")
         doc_desc = self._generate_doc_description(cfg['describe_library_doc'], doc_info)
         logger.info(f"FINISHED: Generating {self._library} description.")

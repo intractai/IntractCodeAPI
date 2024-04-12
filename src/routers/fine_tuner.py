@@ -113,9 +113,9 @@ def get_documentation_data(
     Returns:
         Dict[str, List[str]]: The documentation data.
     """
-    return_data = get_doc_data(library)
+    return_data = get_doc_data(library, lang)
 
-    if gen_problems:        
+    if gen_problems:
         lib_problem_generator = LibraryProblemGenerator(model, lang, library, max_char_count,
                                                          feature_num, problem_num_per_bullet_point)
         return_data['problems'] = lib_problem_generator.generate()
