@@ -253,6 +253,7 @@ class AsyncDocsScraper(Scraper):
             'FEED_URI': file_path,
             'LOG_LEVEL': 'ERROR',
             'COMPRESSION_ENABLED': 'False',
+            'CLOSESPIDER_PAGECOUNT': '10',
         })
         process.crawl(DocsSpider, start_urls=start_urls)
         process.start(install_signal_handlers=False)
@@ -308,10 +309,12 @@ class SyncDocsScraper(Scraper):
         visited = set()
         content = []
         char_count = 0
+        page_count = 0
 
         allowed_domains = [urlparse(start_url).netloc]
 
-        while queue:
+        while queue and page_count < 30:
+            page_count += 1
             current_url = queue.pop(0)
             if current_url in visited:
                 continue
@@ -378,7 +381,7 @@ def get_doc_data(library: str, language: Optional[str]) -> dict:
 
     if '//github.com/' in url:
         return GithubScraper([url]).scrape()
-    return AsyncDocsScraper([url]).scrape()
+    return SyncDocsScraper([url]).scrape()
     
 
 def get_docs_overview(library: str, language: Optional[str]) -> str:
