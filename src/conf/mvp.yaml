@@ -9,7 +9,7 @@ session:
 
 
 model:
-  model_name: ${oc.env:MODEL_NAME, deepseek-ai/deepseek-coder-1.3b-base} # 1.3b-instruct} # 5.7bmqa-base} # 6.7b-base}
+  model_name: ${oc.env:MODEL_NAME, deepseek-ai/deepseek-coder-1.3b-instruct} # 5.7bmqa-base} # 6.7b-base}
   model_type: standard 
   bf16: True
   context_length: 2048
