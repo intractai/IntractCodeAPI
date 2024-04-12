@@ -154,6 +154,20 @@ class SessionTracker:
                 return True
             else:
                 return False
+            
+    def is_user_activity_running(self, username: str, activity: str) -> bool:
+        """Check if an activity is running for a user.
+        
+        Args:
+            username (str): The username to check.
+            activity (str): The activity to check.
+            
+        Returns:
+            bool: True if the activity is running, False if the activity is not running.
+        """
+        return username in self._activity_threads \
+            and activity in self._activity_threads[username] \
+            and self._activity_threads[username][activity] != None
     
     def get_user_activity_threads(self, username: str) -> set:
         """Get the activity threads for a user.

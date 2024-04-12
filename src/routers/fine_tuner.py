@@ -4,22 +4,24 @@ import threading
 from typing import Annotated, Dict, List, Optional
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import FileResponse
 from omegaconf import DictConfig
 from pydantic import BaseModel
 from concurrent.futures import ThreadPoolExecutor, CancelledError
 
-from src import config_handler, modeling
+from src import config_handler
+from src.auto_generation.problem_generator import LibraryProblemGenerator
+from src.crawler.docs_scraper import get_doc_data
 from src.modeling import get_model, get_tokenizer
 from src.training import finetune
 from src.training.interactive.train_multi_step_sft import (
     generate_solutions,
     train_multi_step_sft_with_verification,
 )
-from src.users import validate_user_session
-from src.crawler.docs_scraper import get_doc_data
-from src.auto_generation.problem_generator import LibraryProblemGenerator
+from src.users import SessionTracker, validate_user_session
 
 
+FINETUNE_ACTIVITY = 'finetune'
 FINETUNE_THREAD_IDS = set()
 
 logger = logging.getLogger(__name__)
@@ -33,18 +35,29 @@ class ProjectFinetuneData(BaseModel):
     libraries: Optional[List[str]] = None
 
 
-def verify_request_data(item: ProjectFinetuneData):
-    if not (item.project_dict or item.libraries):
-        raise ValueError("Either project_dict or libraries must be provided.")
-    elif item.libraries and not item.language:
-        raise ValueError("Language must be provided if libraries are provided.")
+# @router.get('/learn/project')
+# async def finetune_project_form(
+#         username: Annotated[str, Depends(validate_user_session)],
+#     ):
+#     # Send the static/train_page/train.html file with the following data:
+#     # username, project path, whether or not the user is already finetuning a project
+#     sess_tracker = SessionTracker.get_instance()
+#     finetune_in_progress = sess_tracker.is_user_activity_running(username, FINETUNE_ACTIVITY)
+#     return FileResponse(
+#         'static/train_page/train.html',
+#         media_type = 'text/html',
+#         headers = {
+#             'username': username,
+#             'finetune_in_progress': str(finetune_in_progress)
+#         }
+#     )
 
 
 @router.post('/finetune/project')
 def finetune_project(
         item: ProjectFinetuneData,
         config: Annotated[DictConfig, Depends(config_handler.get_config)],
-        username: Annotated[str, Depends(partial(validate_user_session, activity='finetune'))],
+        username: Annotated[str, Depends(partial(validate_user_session, activity=FINETUNE_ACTIVITY))],
     ):
     max_threads = config.session.max_finetune_threads
     thread_id = threading.get_ident()
@@ -77,6 +90,13 @@ def finetune_project(
             FINETUNE_THREAD_IDS.remove(thread_id)
 
     return result
+
+
+def verify_request_data(item: ProjectFinetuneData):
+    if not (item.project_dict or item.libraries):
+        raise ValueError("Either project_dict or libraries must be provided.")
+    elif item.libraries and not item.language:
+        raise ValueError("Language must be provided if libraries are provided.")
 
 
 def get_documentation_data(
@@ -133,7 +153,6 @@ def finetune_task(item: ProjectFinetuneData, config: DictConfig, username: str):
     item.libraries = item.libraries or []
 
     # Print the current thread id to show that it is different for each request
-    modeling.GLOBAL_FINETUNE_THREAD_ID = threading.get_ident()
     model_config = config.model
 
     model = get_model(username)

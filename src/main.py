@@ -2,6 +2,7 @@
 
 import logging
 import sys
+import warnings
 
 import hydra
 import uvicorn
@@ -35,6 +36,12 @@ def configure_logging():
     handler.setLevel(logging.INFO)
     handler.setFormatter(formatter)
     logger.addHandler(handler)
+
+    warnings.filterwarnings('ignore', message=".*Could not load referrer policy.*")
+    trafilatura_logger = logging.getLogger('trafilatura')
+    trafilatura_logger.setLevel(logging.INFO)
+    lite_llm = logging.getLogger('LiteLLM')
+    lite_llm.setLevel(logging.INFO)
 
 
 def get_app() -> FastAPI:
