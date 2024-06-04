@@ -22,7 +22,8 @@ from src.crawler.utils.docs_finder import find_doc_first_page
 from src.crawler.utils.html_processors import extract_main_text_from_html
 
 html2text.config.MARK_CODE = False
-LATEST_DOCS_KEYWORDS = ['latest', 'stable', 'current', 'master', 'release', 'main', 'default', ]
+# Not using word "latest" because some projects will have a link that says "to the latest version"
+LATEST_DOCS_KEYWORDS = ['stable', 'current', 'master', 'release', 'main', 'default', ]
 EXCLUDE_DOCS_KEYWORDS = ['/version']
 DOC_EXTENSIONS_ON_GITHUB = ('.md', '.rst', '.txt', '.html')
 MAX_OVERVIEW_TOKENS = 10000
@@ -120,11 +121,14 @@ class DocsSpider(scrapy.Spider):
                     'content': content,
                     'code_blocks': code_blocks,
                 }
+            else:
+                return
+                
         except Exception as e:
             logging.info(f"Failed to extract content from {response.url}: {str(e)}")
 
         # To follow links to next pages and continue crawling, but only within the latest documentation
-        try: 
+        try:
             links = response.css('a::attr(href)').getall()
         except Exception as e:
             logging.info(f"Failed to extract links from {response.url}: {str(e)}")
@@ -132,7 +136,7 @@ class DocsSpider(scrapy.Spider):
             
         for link in links:
             # check if LATEST_DOCS_KEYWORDS are in the link
-            if link and not link.startswith('http'):
+            if link and not link.startswith('http') and not link.startswith('mailto:'):
                 if not self.allowed_paths or any(link.startswith(path) for path in self.allowed_paths):
                     link = response.urljoin(link)
                     yield scrapy.Request(link, callback=self.parse)
@@ -246,19 +250,17 @@ class AsyncDocsScraper(Scraper):
             result_dict['code'].extend(item['code_blocks'])
         return result_dict
     
-    def run_crawler(self, queue: multiprocessing.Queue, start_urls: list, file_path: Path):
+    def run_crawler(self, start_urls: list, file_path: Path):
         process = CrawlerProcess({
             'USER_AGENT': 'Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 5.1)',
             'FEED_FORMAT': 'json',
             'FEED_URI': file_path,
             'LOG_LEVEL': 'ERROR',
             'COMPRESSION_ENABLED': 'False',
+            'CLOSESPIDER_PAGECOUNT': '10',
         })
         process.crawl(DocsSpider, start_urls=start_urls)
         process.start(install_signal_handlers=False)
-        with open(file_path, 'r') as f:
-            data = json.load(f)
-        queue.put(data)
 
     def scrape(self):
         """extracts the content and code blocks from the documentation
@@ -282,7 +284,6 @@ class AsyncDocsScraper(Scraper):
             target=self.run_crawler, args=(queue, self._start_urls, file_path))
         process.start()
         process.join()
-        data = queue.get()
 
         with open(file_path, 'r') as f:
             data = json.load(f)
@@ -308,10 +309,12 @@ class SyncDocsScraper(Scraper):
         visited = set()
         content = []
         char_count = 0
+        page_count = 0
 
         allowed_domains = [urlparse(start_url).netloc]
 
-        while queue:
+        while queue and page_count < 30:
+            
             current_url = queue.pop(0)
             if current_url in visited:
                 continue
@@ -333,6 +336,8 @@ class SyncDocsScraper(Scraper):
                 response = requests.get(current_url)
                 if response.status_code != 200:
                     continue
+                else:
+                    page_count += 1
                 
                 page_content = extract_main_text_from_html(response.content.decode('utf-8'))
                 char_count += len(page_content)
@@ -341,11 +346,14 @@ class SyncDocsScraper(Scraper):
                 content.append(page_content)
                 if char_count >= MAX_OVERVIEW_TOKENS and limit_tokens:
                     return '\n\n'.join(content)
+                
+                code_blocks = soup.find_all('pre')
+                print('code_blocks:', code_blocks)
 
                 # Find all links and add them to the queue if not visited
                 for link in soup.find_all('a', href=True):
                     absolute_link = urljoin(current_url, link['href'])
-                    if absolute_link not in visited:
+                    if absolute_link not in visited and not link['href'].startswith('mailto:'):
                         queue.append(absolute_link)
 
             except Exception as e:
@@ -357,7 +365,10 @@ class SyncDocsScraper(Scraper):
             
         if limit_tokens:
             return '\n\n'.join(content)
-        return content
+        return {
+            'content': content,
+            'code': []
+        }
 
 
 def get_doc_data(library: str, language: Optional[str]) -> dict:
@@ -378,7 +389,7 @@ def get_doc_data(library: str, language: Optional[str]) -> dict:
 
     if '//github.com/' in url:
         return GithubScraper([url]).scrape()
-    return AsyncDocsScraper([url]).scrape()
+    return SyncDocsScraper([url]).scrape()
     
 
 def get_docs_overview(library: str, language: Optional[str]) -> str:
