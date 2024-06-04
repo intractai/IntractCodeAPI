@@ -3,11 +3,13 @@ import logging
 import threading
 from typing import Annotated, Dict, List, Optional
 
+from concurrent.futures import ThreadPoolExecutor, CancelledError
 from fastapi import APIRouter, Depends
 from fastapi.responses import FileResponse
 from omegaconf import DictConfig
 from pydantic import BaseModel
-from concurrent.futures import ThreadPoolExecutor, CancelledError
+import torch
+from transformers import PreTrainedTokenizer
 
 from src import config_handler
 from src.auto_generation.problem_generator import LibraryProblemGenerator
@@ -101,8 +103,8 @@ def verify_request_data(item: ProjectFinetuneData):
 
 def get_documentation_data(
         library: str, gen_problems: bool = False, lang: str = 'Python',
-        feature_num: int = 10, problem_num_per_bullet_point: int = 5,
-        max_char_count: int = 10000, model: str = 'gpt-3.5-turbo'
+        feature_num: int = 10, problem_num_per_bullet_point: int = 30,
+        max_char_count: int = 10000, model: str = 'gpt-3.5-turbo',
     ) -> Dict[str, List[str]]:
     """Get the documentation data for a library.
     
@@ -127,7 +129,31 @@ def get_documentation_data(
     return return_data
 
 
-def finetune_task(item: ProjectFinetuneData, config: DictConfig, username: str):
+def finetune_task(item: ProjectFinetuneData, config: DictConfig, username: str) :
+    """Finetune the model with the user's codebase and documentation.
+    
+    Args:
+        item (ProjectFinetuneData): The project, language, and library data.
+        config (DictConfig): The global config.
+        username (str): The username of the user.
+    """
+    logging.info(f"Finetuning on project for user: {username}.")
+    item.libraries = item.libraries or []
+
+    model = get_model(username)
+    tokenizer = get_tokenizer(username)
+
+    finetune_model(item, config, model, tokenizer)
+
+    return {"result": "success"}
+
+
+def finetune_model(
+        item: ProjectFinetuneData,
+        config: DictConfig,
+        model: torch.nn.Module,
+        tokenizer: PreTrainedTokenizer
+    ) -> torch.nn.Module:
     """Finetune the model with the user's codebase and documentation.
     
     Finetune steps:
@@ -151,17 +177,11 @@ def finetune_task(item: ProjectFinetuneData, config: DictConfig, username: str):
     Args:
         item (ProjectFinetuneData): The project, language, and library data.
         config (DictConfig): The global config.
-        username (str): The username of the user.
+        model (torch.nn.Module): The model to finetune.
+        tokenizer (PreTrainedTokenizer): The tokenizer for the model.
     """
-    logging.info(f"Finetuning on project for user: {username}.")
-    item.libraries = item.libraries or []
-
-    # Print the current thread id to show that it is different for each request
     model_config = config.model
-
-    model = get_model(username)
-    tokenizer = get_tokenizer(username)
-
+    
     # Determine what data to collect / generate
     require_problems = config.train.train_on_practice_problems \
         or config.train.train_on_verified_solutions
@@ -277,6 +297,5 @@ def finetune_task(item: ProjectFinetuneData, config: DictConfig, username: str):
                         output_dir=model_config.save_model_dir, report_to='none',
                         train_methods=train_methods,
                     )
-
-
-    return {"result": "success"}
+    
+    return model

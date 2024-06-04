@@ -55,4 +55,4 @@ WIP
 
 Each project directory should contain a `metadata.json` file with the following fields:
 - `test_type`: one of `related`, `unrelated`
-- `generic_benchmarks`: a list of generic benchmarks to evaluate on, valid values: {`HumanEval`, `MBPP`}
+- `generic_benchmarks`: a list of generic benchmarks to evaluate on, valid values: {`HumanEval`, `MBPP`, `all`}

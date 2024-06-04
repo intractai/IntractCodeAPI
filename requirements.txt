@@ -33,3 +33,4 @@ litellm
 tenacity
 beautifulsoup4
 lxml[html_clean]
+human-eval @ git+https://github.com/openai/human-eval@master

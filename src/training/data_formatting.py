@@ -173,13 +173,16 @@ def format_ntp_inference_input(
             The maximum length of the generated sequence. Defaults to 256.
     """
 
-    fp_tokens = tokenizer.encode(
-        f'# {file_path}\n',
-        return_tensors='pt',
-        add_special_tokens=False,
-        truncation=True,
-        max_length=MAX_FP_TOKENS,
-    )[0]
+    if file_path is None:
+        fp_tokens = torch.tensor([], dtype=torch.long)
+    else:
+        fp_tokens = tokenizer.encode(
+            f'# {file_path}\n',
+            return_tensors='pt',
+            add_special_tokens=False,
+            truncation=True,
+            max_length=MAX_FP_TOKENS,
+        )[0]
 
     max_context_length = \
         config.model.context_length - len(fp_tokens) - max_decode_length
@@ -225,13 +228,16 @@ def format_fim_inference_input(
             The maximum length of the generated sequence. Defaults to 256.
     """
 
-    fp_tokens = tokenizer.encode(
-        f'# {file_path}\n',
-        return_tensors='pt',
-        add_special_tokens=False,
-        truncation=True,
-        max_length=MAX_FP_TOKENS,
-    )[0]
+    if file_path is None:
+        fp_tokens = torch.tensor([], dtype=torch.long)
+    else:
+        fp_tokens = tokenizer.encode(
+            f'# {file_path}\n',
+            return_tensors='pt',
+            add_special_tokens=False,
+            truncation=True,
+            max_length=MAX_FP_TOKENS,
+        )[0]
     prefix = tokenizer.encode(
         preceeding_text,
         return_tensors='pt',
