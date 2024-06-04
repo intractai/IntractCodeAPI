@@ -371,7 +371,7 @@ class SyncDocsScraper(Scraper):
         }
 
 
-def get_doc_data(library: str, language: Optional[str]) -> dict:
+def get_doc_data(library: Optional[str] = None, url: Optional[str] = None, language: str = '') -> dict:
     """extracts the content and code blocks from the documentation given library name
 
     Args:
@@ -384,15 +384,19 @@ def get_doc_data(library: str, language: Optional[str]) -> dict:
             'code': [list of all the code blocks extracted from the documentation]
         }
     """
-    url = find_doc_first_page(library, language)
-    print(f"[get_docs_data] Found documentation URL: {url}")
+    if not library and not url:
+        raise ValueError('Either library or url should be provided!')
+    
+    if not url:
+        url = find_doc_first_page(library, language)
+        print(f"[get_docs_data] Found documentation URL: {url}")
 
     if '//github.com/' in url:
         return GithubScraper([url]).scrape()
     return SyncDocsScraper([url]).scrape()
     
 
-def get_docs_overview(library: str, language: Optional[str]) -> str:
+def get_doc_overview(library: Optional[str] = None, url: Optional[str] = None, language: str = '') -> dict:
     """extracts the content from the documentation given library name
 
     Args:
@@ -402,8 +406,12 @@ def get_docs_overview(library: str, language: Optional[str]) -> str:
     Returns:
         str: the content extracted from the documentation
     """
-    url = find_doc_first_page(library, language)
-    print(f"[get_docs_overview] Found documentation URL: {url}")
+    if not library and not url:
+        raise ValueError('Either library or url should be provided!')
+    
+    if not url:
+        url = find_doc_first_page(library, language)
+        print(f"[get_docs_overview] Found documentation URL: {url}")
 
     if '//github.com/' in url:
         return GithubScraper([url]).scrape(limit_tokens=True)

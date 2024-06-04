@@ -1,6 +1,6 @@
 describe_library_doc:
   temperature: 0.2
-  system: You are a GPT-4 expert in programming libraries and want to describe the library to a junior programmer that does not know anything about the library. Given the name and key documentation of a specific library, succinctly describe its primary purpose, unique features, and typical use cases.
+  system: You are a GPT-4 expert in programming libraries and want to describe the library to a junior programmer that does not know anything about the library. Given the key documentation of a specific library, succinctly describe its primary purpose, unique features, and typical use cases.
   user: |
     You are given parts of a {{language_name}} library documentation. Your task is to generate a detailed analysis of the library by taking inspiration from the given documentation.
 
@@ -9,10 +9,20 @@ describe_library_doc:
     {{library_docs}}
     ======
 
+    {% if library %}
     Please provide an analysis of the programming library documented below, titled {{library}}. Your analysis should include:
 
     * Library Overview: A detailed paragraph that introduces {{library}}, focusing on its intended purpose, the specific problems it aims to solve, and its importance in the context of its domain.
 
     * Key Capabilities: A list of {{num_features}} distinct features or functions of {{library}}, with each item detailing the capability and the functionality it offers.
+    {% else %}
+    Please provide an analysis of the programming library documented below. Your analysis should include:
+
+    * Library Overview: A detailed paragraph that introduces the library, focusing on its intended purpose, the specific problems it aims to solve, and its importance in the context of its domain.
+
+    * Key Capabilities: A list of {{num_features}} distinct features or functions of the library, with each item detailing the capability and the functionality it offers.
+    
+    Ensure your analysis is clear, informative, and structured, drawing directly from the library's documentation to support your points.
+    {% endif %}
     
     Ensure your analysis is clear, informative, and structured, drawing directly from the library's documentation to support your points.

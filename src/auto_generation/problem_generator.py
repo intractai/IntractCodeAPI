@@ -1,13 +1,14 @@
 from abc import ABC, abstractmethod
 import os
 import logging
+from typing import Optional
 
 import jinja2
 import yaml
 from litellm import completion
 from tenacity import retry, stop_after_attempt, wait_fixed
 
-from src.crawler.docs_scraper import get_docs_overview
+from src.crawler.docs_scraper import get_doc_overview
 from src import config_handler
 
 
@@ -34,19 +35,24 @@ class AutoDataGenerator(ABC):
 
 class LibraryProblemGenerator(AutoDataGenerator):
     
-    def __init__(self, model_name: str, lang: str, library: str, max_chars: int, 
-                 feature_num: int, problem_num_per_bullet_point: int):
+    def __init__(
+            self, model_name: str, lang: str, library: Optional[str], url: Optional[str],
+            max_chars: int, feature_num: int, problem_num_per_bullet_point: int,
+        ):
         self._model_name = model_name
         self._lang = lang
         self._library = library
+        self._url = url
         self._max_chars = max_chars #TODO: not used for now.
         self._feature_num = feature_num
         self._problem_num_per_bullet_point = problem_num_per_bullet_point
 
+        assert self._library is not None or self._url is not None, "Either library or url must be provided!"
+
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
     def _generate_doc_description(self, cfg: dict, doc_info: str):
         
-        environment = jinja2.Environment()
+        environment = jinja2.Environment(trim_blocks=True, lstrip_blocks=True)
         template = environment.from_string(cfg['system'])
         system_content = template.render(library_docs=doc_info, language_name=self._lang, 
                                         library=self._library, feature_num=self._feature_num)
@@ -63,7 +69,7 @@ class LibraryProblemGenerator(AutoDataGenerator):
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
     def _generate_problems_description(self, cfg: dict, doc_desc: str):    
-        environment = jinja2.Environment()
+        environment = jinja2.Environment(trim_blocks=True, lstrip_blocks=True)
         template = environment.from_string(cfg['system'])
         system_content = template.render(library_desc=doc_desc, language_name=self._lang, 
                                         library=self._library, feature_num=self._feature_num,
@@ -86,7 +92,7 @@ class LibraryProblemGenerator(AutoDataGenerator):
 
     def generate(self):
         cfg = config_handler.get_config()
-        doc_info = get_docs_overview(self._library, self._lang)
+        doc_info = get_doc_overview(self._library, self._url, self._lang)
         logger.info(f"FINISHED: Extracting {self._library} documentation information.")
         doc_desc = self._generate_doc_description(cfg['describe_library_doc'], doc_info)
         logger.info(f"FINISHED: Generating {self._library} description.")

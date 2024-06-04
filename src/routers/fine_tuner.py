@@ -35,6 +35,7 @@ class ProjectFinetuneData(BaseModel):
     project_dict: Optional[Dict[str, str]] = None
     language: Optional[str] = None
     libraries: Optional[List[str]] = None
+    urls: Optional[List[str]] = None
 
 
 # @router.get('/learn/project')
@@ -95,16 +96,17 @@ def finetune_project(
 
 
 def verify_request_data(item: ProjectFinetuneData):
-    if not (item.project_dict or item.libraries):
+    if not (item.project_dict or item.libraries or item.urls):
         raise ValueError("Either project_dict or libraries must be provided.")
     elif item.libraries and not item.language:
         raise ValueError("Language must be provided if libraries are provided.")
 
 
 def get_documentation_data(
-        library: str, gen_problems: bool = False, lang: str = 'Python',
-        feature_num: int = 10, problem_num_per_bullet_point: int = 30,
-        max_char_count: int = 10000, model: str = 'gpt-3.5-turbo',
+        library: Optional[str] = None, url: Optional[str] = None,
+        gen_problems: bool = False, lang: str = 'Python', feature_num: int = 10,
+        problem_num_per_bullet_point: int = 30, max_char_count: int = 10000,
+        model: str = 'gpt-3.5-turbo',
     ) -> Dict[str, List[str]]:
     """Get the documentation data for a library.
     
@@ -115,15 +117,17 @@ def get_documentation_data(
     Returns:
         Dict[str, List[str]]: The documentation data.
     """
-    return_data = get_doc_data(library, lang)
+    return_data = get_doc_data(library, url, lang)
     
     # Remove duplicate strings
     return_data['content'] = list(set(return_data['content']))
     return_data['code'] = list(set(return_data['code']))
 
     if gen_problems:
-        lib_problem_generator = LibraryProblemGenerator(model, lang, library, max_char_count,
-                                                         feature_num, problem_num_per_bullet_point)
+        lib_problem_generator = LibraryProblemGenerator(
+            model, lang, library, url, max_char_count,
+            feature_num, problem_num_per_bullet_point,
+        )
         return_data['problems'] = lib_problem_generator.generate()
 
     return return_data
@@ -175,7 +179,7 @@ def finetune_model(
         - use_fim (fill-in-the-middle)
     
     Args:
-        item (ProjectFinetuneData): The project, language, and library data.
+        item (ProjectFinetuneData): The project, language, libraries, and urls.
         config (DictConfig): The global config.
         model (torch.nn.Module): The model to finetune.
         tokenizer (PreTrainedTokenizer): The tokenizer for the model.
@@ -189,7 +193,10 @@ def finetune_model(
         config.train.train_on_docs \
         or config.train.train_on_doc_code \
         or require_problems
-    ) and bool(item.libraries)
+    ) and (
+        bool(item.libraries)
+        or bool(item.urls)
+    )
         
     
     train_methods = []
@@ -205,7 +212,10 @@ def finetune_model(
         lib_futures = {}
         for library in item.libraries:
             lib_futures[library] = executor.submit(
-                get_documentation_data, library, require_problems)
+                get_documentation_data, library=library, gen_problems=require_problems)
+        for url in item.urls:
+            lib_futures[url] = executor.submit(
+                get_documentation_data, url=url, gen_problems=require_problems)
 
     # Train on the user's codebase while asynchronously collecting documentation
     if config.train.train_on_code and item.project_dict:
