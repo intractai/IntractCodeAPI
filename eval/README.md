@@ -24,7 +24,7 @@ WIP
                 {code_file_and_dirs}
             documents/
                 {doc_file_and_dirs} (currently unused, in the future could support documents like PDFs)
-            links.txt
+            links.txt (each link should be separated by a newline)
         test/
             {test_code_file_and_dirs}
     ```

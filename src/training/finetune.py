@@ -295,8 +295,8 @@ class DataCollatorForSupervisedDataset(object):
 
 
 def train_self_supervised(
-        model: PreTrainedModel, tokenizer: PreTrainedTokenizer, train_dataset: Dataset,
-        config: DictConfig, eval_datasets: Optional[Dict[str, Dataset]] = None,
+        model: PreTrainedModel, tokenizer: PreTrainedTokenizer, config: DictConfig,
+        train_dataset: Optional[Dataset] = None, eval_datasets: Optional[Dict[str, Dataset]] = None,
         compute_metrics = None, metrics_collator: Callable = None, **kwargs,
     ):
     """Train a model in a self-supervised manner given a dataset.
@@ -307,11 +307,11 @@ def train_self_supervised(
     Args:
         model (PreTrainedModel): The model to train.
         tokenizer (PreTrainedTokenizer): The tokenizer to use.
+        config (dict): The training configuration.
         train_dataset (Dataset): The dataset to train on.
         eval_datasets (Dict[str, Dataset]): The datasets to evaluate on.
         compute_metrics (Callable): The function to compute metrics.
         metrics_collator (Callable): The function to collate metrics.
-        config (dict): The training configuration.
         **kwargs: Additional arguments passed to trainer args.
     """
     parser = transformers.HfArgumentParser((TrainingArguments))
@@ -333,7 +333,13 @@ def train_self_supervised(
         data_collator = data_collator,
     )
 
-    trainer.train()
+    metrics = None
+    if train_dataset:
+        trainer.train()
+    elif eval_datasets:
+        metrics = trainer.evaluate()
+    else:
+        raise ValueError("No dataset provided for training or evaluation!")
 
     # Release all the memory used by the trainer
     # Had some memory leak issues and this maybe solved it?
@@ -346,11 +352,12 @@ def train_self_supervised(
     del trainer
 
     torch.cuda.empty_cache()
-
+    
+    return metrics
 
 def train_self_supervised_documents(
-        model: PreTrainedModel, tokenizer: PreTrainedTokenizer,
-        documents: List[str], config: DictConfig, eval_data: Optional[List[str]] = None,
+        model: PreTrainedModel, tokenizer: PreTrainedTokenizer, config: DictConfig,
+        documents: Optional[List[str]] = None, eval_data: Optional[List[str]] = None,
         compute_metrics = None, metrics_collator: Callable = None,
         train_methods: Optional[List[str]] = None, **kwargs,
     ):
@@ -365,7 +372,10 @@ def train_self_supervised_documents(
             'ntp' (next token prediction) and 'fim' (fill-in-the-middle) are available.
             If None, only ntp is used.
     """
-    train_dataset = documents_to_dataset(documents, tokenizer, train_methods)
+    if documents is None:
+        train_dataset = None
+    else:
+        train_dataset = documents_to_dataset(documents, tokenizer, train_methods)
 
     if eval_data is None:
         eval_datasets = None
@@ -373,19 +383,23 @@ def train_self_supervised_documents(
         eval_datasets = {}
         for dataset_name, data in eval_data.items():
             eval_datasets[dataset_name] = documents_to_dataset(data, tokenizer, train_methods)
+        if len(eval_datasets) == 1:
+            eval_datasets = eval_datasets[0]
 
-    train_self_supervised(
-        model, tokenizer, train_dataset, config, eval_datasets,
+    metrics = train_self_supervised(
+        model, tokenizer, config, train_dataset, eval_datasets,
         compute_metrics, metrics_collator, **kwargs
     )
 
+    return metrics
+
 
 def train_self_supervised_project(
-        model: PreTrainedModel, tokenizer: PreTrainedTokenizer, project_data,
-        config: DictConfig, eval_data = None, compute_metrics = None,
+        model: PreTrainedModel, tokenizer: PreTrainedTokenizer, config: DictConfig,
+        project_data = None, eval_data = None, compute_metrics = None,
         metrics_collator: Callable = None, train_methods: Optional[List[str]] = None,
         **kwargs,
-    ):
+    ) -> Optional[Dict[str, Any]]:
     """Train a model in a self-supervised manner given a dataset.
     
     For arguments other than project_data, eval_data, and train_methods,
@@ -397,10 +411,16 @@ def train_self_supervised_project(
         train_methods (List[str]): The training methods to use.
             'ntp' (next token prediction) and 'fim' (fill-in-the-middle) are available.
             If None, only ntp is used.
+    
+    Returns:
+        Optional[Dict[str, Any]]: The metrics from the evaluation (if no training set and evaluation only).
     """
     # Eval data must be in format {name_of_dataset: {file_name: file_contents, ...}},
     # even if only one eval dataset
-    train_dataset = project_to_dataset(project_data, tokenizer, train_methods)
+    if project_data is None:
+        train_dataset = None
+    else:
+        train_dataset = project_to_dataset(project_data, tokenizer, train_methods)
 
     if eval_data is None:
         eval_datasets = None
@@ -408,8 +428,12 @@ def train_self_supervised_project(
         eval_datasets = {}
         for dataset_name, data in eval_data.items():
             eval_datasets[dataset_name] = project_to_dataset(data, tokenizer, train_methods)
+        if len(eval_datasets) == 1:
+            eval_datasets = eval_datasets[list(eval_datasets.keys())[0]]
 
-    train_self_supervised(
-        model, tokenizer, train_dataset, config, eval_datasets,
+    metrics = train_self_supervised(
+        model, tokenizer, config, train_dataset, eval_datasets,
         compute_metrics, metrics_collator, **kwargs
     )
+
+    return metrics

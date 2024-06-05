@@ -221,7 +221,7 @@ def finetune_model(
     if config.train.train_on_code and item.project_dict:
         logger.info("Training on user's codebase")
         finetune.train_self_supervised_project(
-            model, tokenizer, item.project_dict, config.train,
+            model, tokenizer, config.train, item.project_dict,
             output_dir=model_config.save_model_dir, report_to='none',
             train_methods=train_methods,
         )
@@ -253,7 +253,7 @@ def finetune_model(
             else:
                 logger.info(f"Training on {len(train_documents)} documents of documentation text")
                 finetune.train_self_supervised_documents(
-                    model, tokenizer, train_documents, config.train,
+                    model, tokenizer, config.train, train_documents,
                     output_dir=model_config.save_model_dir, report_to='none',
                     train_methods=['ntp'],
                 )
@@ -270,7 +270,7 @@ def finetune_model(
             else:
                 logger.info("Training on documentation code snippets")
                 finetune.train_self_supervised_documents(
-                    model, tokenizer, train_code, config.train,
+                    model, tokenizer, config.train, train_code,
                     output_dir=model_config.save_model_dir, report_to='none',
                     train_methods=train_methods,
                 )
@@ -303,7 +303,7 @@ def finetune_model(
                     # Some solutions will be None if no solution was found
                     solutions = [x for x in solutions if x]
                     finetune.train_self_supervised_documents(
-                        model, tokenizer, solutions, config.train,
+                        model, tokenizer, config.train, solutions,
                         output_dir=model_config.save_model_dir, report_to='none',
                         train_methods=train_methods,
                     )

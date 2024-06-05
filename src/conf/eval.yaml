@@ -4,8 +4,8 @@ defaults:
 wandb: False
 
 model:
-  save_model_dir: "src/saved_models/"
-  model_dir: "src/.model/"
+  save_model_dir: "../src/saved_models/"
+  model_dir: "../src/.model/"
   model_name: ${oc.env:MODEL_NAME, deepseek-ai/deepseek-coder-1.3b-base} # 1.3b-instruct} # 5.7bmqa-base} # 6.7b-base}
   model_type: standard 
   bf16: True
@@ -14,11 +14,16 @@ model:
   use_flash_attention: True
 
 eval:
-  holdout_frac: 0.2
-  total_epochs: 2
-  epochs_per_project: 2
-  n_finetune_projects: 5
-  n_ood_projects: 3
+  metrics_output_dir: "metrics/"
+
+  # Benchmarks
+  human_eval: False
+
+  # Eval params
+  # total_epochs: 2
+  # epochs_per_project: 2
+  # n_finetune_projects: 5
+  # n_ood_projects: 3
 
 
 train:
@@ -50,9 +55,10 @@ train:
   # Trainer parameters
   trainer:
     per_device_train_batch_size: 2
+    per_device_eval_batch_size: 8
     logging_steps: 8
     logging_strategy: steps
-    num_train_epochs: 2
+    num_train_epochs: 6
     optim: adamw_bnb_8bit
     
   # Iterative SFT Trainer parameters for multi-step SFT with verification
