@@ -4,9 +4,9 @@ defaults:
 wandb: False
 
 model:
-  save_model_dir: "../src/saved_models/"
-  model_dir: "../src/.model/"
-  model_name: ${oc.env:MODEL_NAME, deepseek-ai/deepseek-coder-1.3b-base} # 1.3b-instruct} # 5.7bmqa-base} # 6.7b-base}
+  save_model_dir: "../saved_models/"
+  model_dir: "../.model/"
+  model_name: ${oc.env:MODEL_NAME, deepseek-ai/deepseek-coder-1.3b-instruct} # 1.3b-instruct} # 5.7bmqa-base} # 6.7b-base}
   model_type: standard 
   bf16: True
   context_length: 1536
@@ -18,6 +18,9 @@ eval:
 
   # Benchmarks
   human_eval: False
+
+  # Tasks
+  custom_tasks: True
 
   # Eval params
   # total_epochs: 2
@@ -35,7 +38,8 @@ train:
   use_fim: True
 
   # What to train on
-  train_on_code: True
+  train_on_code: False
+  train_on_documents: True
   train_on_docs: False
   train_on_doc_code: False
   train_on_practice_problems: False # Instruction fine-tuning on entire problems
@@ -45,7 +49,7 @@ train:
   max_query_length: 768 # 1536 # Maximum length of input query for instruction fine-tuning
   max_revision_steps: 3 # Maximum number of revisions for instruction fine-tuning + 1
   use_critic: True # Use dummy critic for testing when False
-  generation_batch_size: 32 # 48 # Number of proposed solutions to generate in a single batch
+  generation_batch_size: 16 # 48 # Number of proposed solutions to generate in a single batch
   execution_timeout: 10 # Time limit for code execution in seconds
   execution_length_limit: 400 # Character limit for code execution output
   conda_env: "agent_env"
@@ -58,7 +62,7 @@ train:
     per_device_eval_batch_size: 8
     logging_steps: 8
     logging_strategy: steps
-    num_train_epochs: 6
+    num_train_epochs: 2
     optim: adamw_bnb_8bit
     
   # Iterative SFT Trainer parameters for multi-step SFT with verification
@@ -70,3 +74,7 @@ train:
     logging_strategy: steps
     optim: adamw_bnb_8bit
     gradient_checkpointing: True
+
+cache:
+  cache_dir: "../.cache/"
+  cache_documents: True

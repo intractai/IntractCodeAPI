@@ -37,7 +37,7 @@ class ProjectFinetuneData(BaseModel):
     language: Optional[str] = None
     libraries: Optional[List[str]] = None
     urls: Optional[List[str]] = None
-    documents: Optional[List[Tuple[str, ByteString]]] = None
+    documents: Optional[List[Tuple[str, bytes]]] = None
 
 
 # @router.get('/learn/project')
@@ -232,7 +232,7 @@ def finetune_model(
     if config.train.train_on_documents and item.documents is not None:
         document_text = []
         for (name, document_bytes) in item.documents:
-            parts = name.split('.')[-1]
+            parts = name.split('.')
             if len(parts) > 1:
                 file_type = parts[-1]
             else:
@@ -242,12 +242,13 @@ def finetune_model(
                 file_type,
                 cache = config.cache.get('cache_documents', False),
                 cache_dir = config.cache.get('cache_dir'),
+                batch_size = 8,
             )
             if text:
                 document_text.append(text)
 
         if len(document_text) > 0:
-            logger.info(f"Training on {len(document_text)} documents of documentation text")
+            logger.info(f"Training on {len(document_text)} document(s)")
             finetune.train_self_supervised_documents(
                 model, tokenizer, config.train, document_text,
                 output_dir=model_config.save_model_dir, report_to='none',

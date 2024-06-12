@@ -2,6 +2,7 @@ from functools import partial
 import hashlib
 import io
 import logging
+import os
 from pathlib import Path
 import re
 from typing import ByteString, Callable, List, Optional, Tuple, Union
@@ -243,6 +244,7 @@ def save_to_cache(byte_string: ByteString, cache_dir: str, text: str):
     """Save text to cache using the input byte string hash as the key."""
     hash = hashlib.md5(byte_string).hexdigest()
     cache_path = Path(cache_dir) / hash
+    os.makedirs(cache_path.parent, exist_ok=True)
     with open(cache_path, 'w') as f:
         f.write(text)
 
@@ -253,7 +255,7 @@ def read_from_bytes(
         cache: bool = False,
         cache_dir: Optional[str] = None,
         **kwargs,
-    ) -> Optional[str]:
+    ) -> str:
     """Convert the byte string to text with file-type specific conversion handlers."""
     use_cache = cache and cache_dir
 
@@ -264,6 +266,7 @@ def read_from_bytes(
 
     handler_fn = CONVERSION_HANDLER_REGISTRY.get(file_type.lower(), load_generic_text_doc)
     text = handler_fn(byte_string, **kwargs)
+    text = text or ''
 
     if use_cache:
         save_to_cache(byte_string, cache_dir, text)

@@ -123,15 +123,13 @@ def load_documents(relative_path: str) -> List[str]:
     """
     all_documents = []
     data_dir = Path(__file__).parent / relative_path
-    for doc_path in data_dir.glob('**'):
+    for doc_path in data_dir.glob('**/*'):
         if doc_path.is_file():
-            try:
-                with open(doc_path, 'r', encoding='utf-8') as f:
-                    doc_text = f.read()
-                if len(doc_text) > 0:
-                    all_documents.append(doc_text)
-            except UnicodeDecodeError:
-                logging.warning(f'Error reading file {doc_path}. Skipping...')
+            with open(doc_path, 'rb') as f:
+                doc_bytes = f.read()
+            if len(doc_bytes) > 0:
+                all_documents.append((doc_path.name, doc_bytes))
+                logger.debug(f'Loaded document: {doc_path}')
 
     return all_documents
 
@@ -322,7 +320,8 @@ def run_benchmarks(
         names = None
 
     metrics = {}
-    for benchmark_name in config['eval']['benchmarks']:
+    enabled_benchmarks = set([b for b in VALID_BENCHMARKS if config['eval'].get(b, False)])
+    for benchmark_name in enabled_benchmarks:
         if names is not None and benchmark_name not in names:
             continue
 
@@ -397,6 +396,9 @@ def run_eval(config: DictConfig, model_provider: ModelProvider):
     else:
         logger.info("No benchmarks enabled.")
 
+    if not config['eval'].get('custom_tasks', True):
+        return EvalResults([], benchmark_metrics)
+
     # Make a random seed that will be used for both pre- and post-finetune eval
     # This is required to keep the FIM examples the same for both runs
     eval_seed = random.randint(0, 2**32 - 1)
@@ -430,6 +432,7 @@ def run_eval(config: DictConfig, model_provider: ModelProvider):
             project_dict = task_info['train'].get('code'),
             urls = task_info['train'].get('links'),
             language = 'python',
+            documents = task_info['train'].get('docs'),
         )
         model = finetune_model(finetune_data, config, model, tokenizer)
 

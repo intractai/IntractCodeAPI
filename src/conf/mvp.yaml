@@ -5,11 +5,11 @@ defaults:
 session:
   max_active_sessions: 4
   eviction_interval: 120 # Check for idle sessions every 2 minutes
-  max_session_idle_time: 600 # Evict sessions that have been idle for 10 minutes
+  max_session_idle_time: 1800 # Evict sessions that have been idle for 30 minutes
 
 
 model:
-  model_name: ${oc.env:MODEL_NAME, deepseek-ai/deepseek-coder-1.3b-instruct} # 5.7bmqa-base} # 6.7b-base}
+  model_name: ${oc.env:MODEL_NAME, deepseek-ai/deepseek-coder-1.3b-base} # 1.3b-instruct} # 5.7bmqa-base} # 6.7b-base}
   model_type: standard 
   bf16: True
   context_length: 2048
@@ -18,7 +18,7 @@ model:
 
 
 train:
-  max_gen_length: 512 # Maximum length of generated code
+  max_gen_length: 256 # 512 # Maximum length of generated code
   max_retrieval_threads: 4 # Maximum number of threads to use for retriving documentation data
 
   # What types of training to use
@@ -29,11 +29,11 @@ train:
   train_on_code: True
   train_on_docs: True
   train_on_doc_code: True
-  train_on_practice_problems: True # Instruction fine-tuning on entire problems
+  train_on_practice_problems: False # Instruction fine-tuning on entire problems
   train_on_verified_solutions: True # NTP/FIM training on just the solutions
 
   # Parameters for multi-step SFT with verification
-  max_query_length: 1536 # Maximum length of input query for instruction fine-tuning
+  max_query_length: 768 # 1536 # Maximum length of input query for instruction fine-tuning
   max_revision_steps: 3 # Maximum number of revisions for instruction fine-tuning + 1
   use_critic: True # Use dummy critic for testing when False
   generation_batch_size: 48 # Number of proposed solutions to generate in a single batch
@@ -45,10 +45,10 @@ train:
 
   # Trainer parameters
   trainer:
-    per_device_train_batch_size: 3
+    per_device_train_batch_size: 2
     logging_steps: 8
     logging_strategy: steps
-    num_train_epochs: 3
+    num_train_epochs: 2 # 3
     optim: adamw_bnb_8bit
     
   # Iterative SFT Trainer parameters for multi-step SFT with verification
@@ -56,7 +56,7 @@ train:
     per_device_train_batch_size: 4
     logging_steps: 4
     gradient_accumulation_steps: 2
-    num_train_epochs: 3
+    num_train_epochs: 1
     logging_strategy: steps
     optim: adamw_bnb_8bit
     gradient_checkpointing: True

@@ -44,7 +44,8 @@ def run_human_eval_benchmark(config: DictConfig, model: PreTrainedModel, tokeniz
 
     # Generate completions and format them for HumanEval
     completions = batch_generate_completions(
-        inputs, config, model, tokenizer, batch_size=config.train.generation_batch_size
+        inputs, config, model, tokenizer, batch_size=config.train.generation_batch_size,
+        progress_bar=True,
     )['output_text']
     samples = [
         dict(task_id=task_id, completion=completion)
