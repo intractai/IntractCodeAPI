@@ -34,3 +34,7 @@ tenacity
 beautifulsoup4
 lxml[html_clean]
 human-eval @ git+https://github.com/openai/human-eval@master
+charset-normalizer==3.3.2
+# pymupdf==1.24.5
+# pymupdf4llm==0.0.5
+nougat-ocr==0.1.17

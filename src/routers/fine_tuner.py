@@ -1,7 +1,7 @@
 from functools import partial
 import logging
 import threading
-from typing import Annotated, Dict, List, Optional
+from typing import Annotated, ByteString, Dict, List, Optional, Tuple
 
 from concurrent.futures import ThreadPoolExecutor, CancelledError
 from fastapi import APIRouter, Depends
@@ -14,6 +14,7 @@ from transformers import PreTrainedTokenizer
 from src import config_handler
 from src.auto_generation.problem_generator import LibraryProblemGenerator
 from src.crawler.docs_scraper import get_doc_data
+from src.documents import read_from_bytes
 from src.modeling import get_model, get_tokenizer
 from src.training import finetune
 from src.training.interactive.train_multi_step_sft import (
@@ -36,6 +37,7 @@ class ProjectFinetuneData(BaseModel):
     language: Optional[str] = None
     libraries: Optional[List[str]] = None
     urls: Optional[List[str]] = None
+    documents: Optional[List[Tuple[str, ByteString]]] = None
 
 
 # @router.get('/learn/project')
@@ -133,7 +135,7 @@ def get_documentation_data(
     return return_data
 
 
-def finetune_task(item: ProjectFinetuneData, config: DictConfig, username: str) :
+def finetune_task(item: ProjectFinetuneData, config: DictConfig, username: str):
     """Finetune the model with the user's codebase and documentation.
     
     Args:
@@ -170,6 +172,7 @@ def finetune_model(
 
     Options (in config):
         - train_on_code
+        - train_on_documents
         - train_on_docs
         - train_on_doc_code
         - train_on_practice_problems (uses instruction finetuning)
@@ -225,6 +228,32 @@ def finetune_model(
             output_dir=model_config.save_model_dir, report_to='none',
             train_methods=train_methods,
         )
+
+    if config.train.train_on_documents and item.documents is not None:
+        document_text = []
+        for (name, document_bytes) in item.documents:
+            parts = name.split('.')[-1]
+            if len(parts) > 1:
+                file_type = parts[-1]
+            else:
+                file_type = ''
+            text = read_from_bytes(
+                document_bytes,
+                file_type,
+                cache = config.cache.get('cache_documents', False),
+                cache_dir = config.cache.get('cache_dir'),
+            )
+            if text:
+                document_text.append(text)
+
+        if len(document_text) > 0:
+            logger.info(f"Training on {len(document_text)} documents of documentation text")
+            finetune.train_self_supervised_documents(
+                model, tokenizer, config.train, document_text,
+                output_dir=model_config.save_model_dir, report_to='none',
+                train_methods=['ntp'],
+            )
+
 
     # Train on the collected documentation
     if require_docs:

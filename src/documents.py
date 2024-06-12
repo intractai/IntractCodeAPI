@@ -1,4 +1,5 @@
 from functools import partial
+import hashlib
 import io
 import logging
 from pathlib import Path
@@ -16,6 +17,7 @@ from nougat.postprocessing import markdown_compatible
 import pymupdf
 import pymupdf4llm
 import pypdfium2
+from omegaconf import DictConfig
 import torch
 from torch.utils.data import ConcatDataset
 from tqdm import tqdm
@@ -146,8 +148,6 @@ def load_pdf_with_nougat(
     page_num = 0
     pdf_contents = []
 
-    # a = next(iter(dataloader))
-
     for i, (sample, is_last_page) in enumerate(tqdm(dataloader)):
 
         model_output = model.inference(
@@ -229,9 +229,46 @@ CONVERSION_HANDLER_REGISTRY = {
 }
 
 
-def read_from_bytes(byte_string: ByteString, file_type: str, **kwargs):
-    handler_fn = CONVERSION_HANDLER_REGISTRY.get(file_type, load_generic_text_doc)
-    return handler_fn(byte_string, **kwargs)
+def retrieve_from_cache(byte_string: ByteString, cache_dir: str):
+    """Retrieve text from cache using the input byte string hash as the key."""
+    hash = hashlib.md5(byte_string).hexdigest()
+    cache_path = Path(cache_dir) / f'{hash}.md'
+    if cache_path.exists():
+        with open(cache_path, 'r') as f:
+            return f.read()
+    return None
+
+
+def save_to_cache(byte_string: ByteString, cache_dir: str, text: str):
+    """Save text to cache using the input byte string hash as the key."""
+    hash = hashlib.md5(byte_string).hexdigest()
+    cache_path = Path(cache_dir) / hash
+    with open(cache_path, 'w') as f:
+        f.write(text)
+
+
+def read_from_bytes(
+        byte_string: ByteString,
+        file_type: str,
+        cache: bool = False,
+        cache_dir: Optional[str] = None,
+        **kwargs,
+    ) -> Optional[str]:
+    """Convert the byte string to text with file-type specific conversion handlers."""
+    use_cache = cache and cache_dir
+
+    if use_cache:
+        cached = retrieve_from_cache(byte_string, cache_dir)
+        if cached is not None:
+            return cached
+
+    handler_fn = CONVERSION_HANDLER_REGISTRY.get(file_type.lower(), load_generic_text_doc)
+    text = handler_fn(byte_string, **kwargs)
+
+    if use_cache:
+        save_to_cache(byte_string, cache_dir, text)
+
+    return text
 
 
 if __name__ == '__main__':

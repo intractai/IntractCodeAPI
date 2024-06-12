@@ -181,9 +181,7 @@ def batch_generate_completions(
             tokenizer.padding_side = padding_side_default
 
         generations = model.generate(
-            **padded_inputs, max_new_tokens=item.max_decode_length,
-            **GENERATION_KWARGS,
-        )
+            **padded_inputs, max_new_tokens=item.max_decode_length, **GENERATION_KWARGS)
 
         for generation, mask in zip(generations, padded_inputs['attention_mask']):
             output = generation[(1 - mask).sum() :] # Remove padding
