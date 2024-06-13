@@ -29,6 +29,8 @@ WIP
             {test_code_file_and_dirs}
     ```
 
+    Our official eval dataset can be downloaded separetely from the repository at [this](https://drive.google.com/file/d/1Z6wagLBtkknVKnjQ4mWQLK5UCgE6VGNc/view?usp=sharing) Google Drive link.
+
 2. Evaluate on generic coding benchmarks with a fresh model.
 
 3. Load each of the project directories and corresponding test directories.
