@@ -1,6 +1,7 @@
 defaults:
   - prompts/describe_library_doc@_here_
   - prompts/generate_library_problems@_here_
+  - rag: default
 
 server:
   host: 127.0.0.1

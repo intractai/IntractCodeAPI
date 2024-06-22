@@ -38,7 +38,7 @@ train:
   use_fim: True
 
   # What to train on
-  train_on_code: False
+  train_on_code: True
   train_on_documents: True
   train_on_docs: False
   train_on_doc_code: False

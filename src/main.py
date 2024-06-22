@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 sys.path.append('../')
 from src import config_handler, database
 from src.modeling import ModelProvider, set_main_thread_id
+from src.rag import VectorStoreProvider
 from src.routers import auth, fine_tuner, generator
 from src.users import SessionTracker
 
@@ -60,6 +61,7 @@ def main(config: DictConfig):
     config_handler.ConfigProvider.initialize(config)
     database.DatabaseProvider.initialize(config.database.path)
     model_provider = ModelProvider.get_instance(config.model)
+    vector_store_provider = VectorStoreProvider(config.rag)
     SessionTracker.get_instance(model_provider, config.session)
 
     # Sets main thread ID

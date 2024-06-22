@@ -16,6 +16,7 @@ from src.auto_generation.problem_generator import LibraryProblemGenerator
 from src.crawler.docs_scraper import get_doc_data
 from src.documents import read_from_bytes
 from src.modeling import get_model, get_tokenizer
+from src.rag import VectorStoreProvider
 from src.training import finetune
 from src.training.interactive.train_multi_step_sft import (
     generate_solutions,
@@ -136,7 +137,7 @@ def get_documentation_data(
 
 
 def finetune_task(item: ProjectFinetuneData, config: DictConfig, username: str):
-    """Finetune the model with the user's codebase and documentation.
+    """Finetune the model with the user's codebase and documentation and store the data for later use.
     
     Args:
         item (ProjectFinetuneData): The project, language, and library data.
@@ -150,6 +151,13 @@ def finetune_task(item: ProjectFinetuneData, config: DictConfig, username: str):
     tokenizer = get_tokenizer(username)
 
     finetune_model(item, config, model, tokenizer)
+    
+    # Store data in RAG database if enabled
+    if config.rag.get('enabled', False):
+        vs_provider = VectorStoreProvider.get_instance()
+        documents = collect_item_data(item, config)
+        if len(documents) > 0:
+            vs_provider.add_documents(username, documents)
 
     return {"result": "success"}
 
@@ -201,7 +209,6 @@ def finetune_model(
         or bool(item.urls)
     )
         
-    
     train_methods = []
     if config.train.use_ntp:
         train_methods.append('ntp')
@@ -339,3 +346,56 @@ def finetune_model(
                     )
     
     return model
+
+
+def collect_item_data(
+        item: ProjectFinetuneData,
+        config: DictConfig,
+    ) -> List[str]:
+    """Coallate all the data from the item into a list of documents.
+
+    Args:
+        item (ProjectFinetuneData): The project, language, libraries, and urls.
+        config (DictConfig): The global config.
+
+    Returns:
+        List[str]: The list of documents.
+    """
+    all_documents = []
+
+    # Get the documentation data for each library
+    if item.libraries:
+        for library in item.libraries:
+            lib_data = get_documentation_data(library=library, gen_problems=False)
+            all_documents.extend(lib_data['content'])
+
+    # Scrape data from each URL
+    if item.urls:
+        for url in item.urls:
+            lib_data = get_documentation_data(url=url, gen_problems=False)
+            all_documents.extend(lib_data['content'])
+
+    # Get code from the project with attached filename
+    if item.project_dict:
+        for name, code in item.project_dict.items():
+            all_documents.append(f'#{name}\n\n{code}')
+
+    # Get text from documents
+    if item.documents:
+        for (name, document_bytes) in item.documents:
+            parts = name.split('.')
+            if len(parts) > 1:
+                file_type = parts[-1]
+            else:
+                file_type = ''
+            text = read_from_bytes(
+                document_bytes,
+                file_type,
+                cache = config.cache.get('cache_documents', False),
+                cache_dir = config.cache.get('cache_dir'),
+                batch_size = 8,
+            )
+            if text:
+                all_documents.append(text)
+
+    return all_documents
