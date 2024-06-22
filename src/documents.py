@@ -5,7 +5,7 @@ import logging
 import os
 from pathlib import Path
 import re
-from typing import ByteString, Callable, List, Optional, Tuple, Union
+from typing import Callable, List, Optional, Tuple, Union
 import uuid
 
 from charset_normalizer import from_bytes
@@ -98,7 +98,7 @@ class PDFDataset(LazyDataset):
 
 
 def load_pdf_with_nougat(
-        pdfs: List[Tuple[str, ByteString]],
+        pdfs: List[Tuple[str, bytes]],
         model_name: str = '0.1.0-small',
         full_precision: bool = False,
         batch_size: int = 4,
@@ -194,7 +194,7 @@ def load_pdf_with_nougat(
     return pdf_contents
 
 
-def load_pdf(byte_string: ByteString, library: str = 'nougat', **kwargs) -> Optional[str]:
+def load_pdf(byte_string: bytes, library: str = 'nougat', **kwargs) -> Optional[str]:
     """Converts a PDF byte string to text using the specified library.
 
     Args:
@@ -220,7 +220,7 @@ def load_pdf(byte_string: ByteString, library: str = 'nougat', **kwargs) -> Opti
     return markdown
 
 
-def load_generic_text_doc(byte_string: ByteString, **kwargs):
+def load_generic_text_doc(byte_string: bytes, **kwargs):
     result = from_bytes(byte_string).best()
     return None if result is None else str(result)
 
@@ -230,17 +230,17 @@ CONVERSION_HANDLER_REGISTRY = {
 }
 
 
-def retrieve_from_cache(byte_string: ByteString, cache_dir: str):
+def retrieve_from_cache(byte_string: bytes, cache_dir: str):
     """Retrieve text from cache using the input byte string hash as the key."""
     hash = hashlib.md5(byte_string).hexdigest()
-    cache_path = Path(cache_dir) / f'{hash}.md'
+    cache_path = Path(cache_dir) / hash
     if cache_path.exists():
         with open(cache_path, 'r') as f:
             return f.read()
     return None
 
 
-def save_to_cache(byte_string: ByteString, cache_dir: str, text: str):
+def save_to_cache(byte_string: bytes, cache_dir: str, text: str):
     """Save text to cache using the input byte string hash as the key."""
     hash = hashlib.md5(byte_string).hexdigest()
     cache_path = Path(cache_dir) / hash
@@ -250,7 +250,7 @@ def save_to_cache(byte_string: ByteString, cache_dir: str, text: str):
 
 
 def read_from_bytes(
-        byte_string: ByteString,
+        byte_string: bytes,
         file_type: str,
         cache: bool = False,
         cache_dir: Optional[str] = None,
