@@ -3,6 +3,8 @@ import threading
 from typing import List
 
 from llama_index.core import Document, VectorStoreIndex
+from llama_index.core.node_parser import TokenTextSplitter
+from llama_index.embeddings.openai import OpenAIEmbedding
 
 
 logger = logging.getLogger(__name__)
@@ -43,7 +45,20 @@ class VectorStoreProvider:
 
     def create_new_vector_store(self):
         """Create a new model and model utilities."""
-        return VectorStoreIndex(embed_model=self.config.embed_model)
+        transformations = [
+            TokenTextSplitter(
+                chunk_size = self.config.chunk_size,
+                chunk_overlap = self.config.chunk_overlap,
+            ),
+            # TODO: Double check if this is needed
+            OpenAIEmbedding(
+                model = self.config.embed_model,
+                dimensions = self.config.get('embed_dim'),
+                max_retries = 4,
+            ),
+        ]
+
+        return VectorStoreIndex(embed_model=self.config.embed_model, transformations=transformations)
 
     def get_vector_store(self, username: str) -> VectorStoreIndex:
         """Get the model and model utilities for the user."""

@@ -33,6 +33,7 @@ class SessionTracker:
     def get_instance(
             cls: 'SessionTracker',
             model_provider = None,
+            vector_store_provider = None,
             config: DictConfig = None,
         ) -> 'SessionTracker':
         """Get the singleton instance of the session tracker.
@@ -50,10 +51,10 @@ class SessionTracker:
             with cls._lock:
                 if cls._instance is None:
                     assert config is not None, "Config must be provided!"
-                    cls._instance = cls(model_provider, config)
+                    cls._instance = cls(model_provider, vector_store_provider, config)
         return cls._instance
 
-    def __init__(self, model_provider, config: DictConfig):
+    def __init__(self, model_provider, vector_store_provider, config: DictConfig):
         """Initialize the session tracker."""
         if SessionTracker._instance is not None:
             raise Exception("This class is a singleton!")
@@ -61,6 +62,7 @@ class SessionTracker:
             assert model_provider is not None, "Model provider must be provided!"
             SessionTracker._instance = self
             self.model_provider = model_provider
+            self.vs_provider = vector_store_provider
             self.max_active_sessions = config.max_active_sessions
             self.eviction_interval = config.eviction_interval
             self.max_session_idle_time = config.max_session_idle_time
@@ -117,6 +119,7 @@ class SessionTracker:
 
         if evicted:
             self.model_provider.delete_model(username)
+            self.vs_provider.delete_vector_store(username)
             logger.info(f"Evicted user {username}")
 
         return evicted

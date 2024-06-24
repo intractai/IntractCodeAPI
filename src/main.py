@@ -61,8 +61,8 @@ def main(config: DictConfig):
     config_handler.ConfigProvider.initialize(config)
     database.DatabaseProvider.initialize(config.database.path)
     model_provider = ModelProvider.get_instance(config.model)
-    vector_store_provider = VectorStoreProvider(config.rag)
-    SessionTracker.get_instance(model_provider, config.session)
+    vector_store_provider = VectorStoreProvider.get_instance(config.rag)
+    SessionTracker.get_instance(model_provider, vector_store_provider, config.session)
 
     # Sets main thread ID
     set_main_thread_id()
