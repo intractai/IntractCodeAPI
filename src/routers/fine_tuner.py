@@ -1,4 +1,5 @@
 from functools import partial
+import hashlib
 import logging
 import threading
 from typing import Annotated, ByteString, Dict, List, Optional, Tuple
@@ -14,7 +15,7 @@ from transformers import PreTrainedTokenizer
 from src import config_handler
 from src.auto_generation.problem_generator import LibraryProblemGenerator
 from src.crawler.docs_scraper import get_doc_data
-from src.documents import read_from_bytes
+from src.documents import read_from_bytes, retrieve_from_cache, save_to_cache
 from src.modeling import get_model, get_tokenizer
 from src.rag import VectorStoreProvider
 from src.training import finetune
@@ -109,7 +110,7 @@ def get_documentation_data(
         library: Optional[str] = None, url: Optional[str] = None,
         gen_problems: bool = False, lang: str = 'Python', feature_num: int = 10,
         problem_num_per_bullet_point: int = 30, max_char_count: int = 10000,
-        model: str = 'gpt-3.5-turbo',
+        model: str = 'gpt-3.5-turbo', cache: bool = False, cache_dir: str = None,
     ) -> Dict[str, List[str]]:
     """Get the documentation data for a library.
     
@@ -120,18 +121,40 @@ def get_documentation_data(
     Returns:
         Dict[str, List[str]]: The documentation data.
     """
-    return_data = get_doc_data(library, url, lang)
+    # Recover from cache if available
+    return_data = None
+    key = f'{library}|{url}|{lang}|doc_data'
+    if cache and cache_dir:
+        return_data = retrieve_from_cache(key, cache_dir)
+        if return_data:
+            logger.debug(f"Retrieved from cache: {key}")
+
+    if not return_data:
+        return_data = get_doc_data(library, url, lang)
+        if cache and cache_dir:
+            save_to_cache(key, cache_dir, return_data)
+            logger.debug(f"Saved to cache: {key}")
     
     # Remove duplicate strings
     return_data['content'] = list(set(return_data['content']))
     return_data['code'] = list(set(return_data['code']))
 
     if gen_problems:
-        lib_problem_generator = LibraryProblemGenerator(
-            model, lang, library, url, max_char_count,
-            feature_num, problem_num_per_bullet_point,
-        )
-        return_data['problems'] = lib_problem_generator.generate()
+        key = f'{library}|{url}|{lang}|{max_char_count}|{feature_num}|{problem_num_per_bullet_point}|problems'
+        if cache and cache_dir:
+            return_data['problems'] = retrieve_from_cache(key, cache_dir)
+            if return_data['problems']:
+                logger.debug(f"Retrieved from cache: {key}")
+
+        if return_data.get('problems') is None:
+            lib_problem_generator = LibraryProblemGenerator(
+                model, lang, library, url, max_char_count,
+                feature_num, problem_num_per_bullet_point,
+            )
+            return_data['problems'] = lib_problem_generator.generate()
+            if cache and cache_dir:
+                save_to_cache(key, cache_dir, return_data['problems'])
+                logger.debug(f"Saved to cache: {key}")
 
     return return_data
 
@@ -222,10 +245,14 @@ def finetune_model(
         lib_futures = {}
         for library in item.libraries:
             lib_futures[library] = executor.submit(
-                get_documentation_data, library=library, gen_problems=require_problems)
+                get_documentation_data, library=library, gen_problems=require_problems,
+                cache=config.cache.get('cache_web', False), cache_dir=config.cache.get('cache_dir'),
+            )
         for url in item.urls:
             lib_futures[url] = executor.submit(
-                get_documentation_data, url=url, gen_problems=require_problems)
+                get_documentation_data, url=url, gen_problems=require_problems,
+                cache=config.cache.get('cache_web', False), cache_dir=config.cache.get('cache_dir'),
+            )
 
     # Train on the user's codebase while asynchronously collecting documentation
     if config.train.train_on_code and item.project_dict:
@@ -366,13 +393,23 @@ def collect_item_data(
     # Get the documentation data for each library
     if item.libraries:
         for library in item.libraries:
-            lib_data = get_documentation_data(library=library, gen_problems=False)
+            lib_data = get_documentation_data(
+                library = library,
+                gen_problems = False,
+                cache = config.cache.get('cache_web', False),
+                cache_dir = config.cache.get('cache_dir'),
+            )
             all_documents.extend(lib_data['content'])
 
     # Scrape data from each URL
     if item.urls:
         for url in item.urls:
-            lib_data = get_documentation_data(url=url, gen_problems=False)
+            lib_data = get_documentation_data(
+                url = url,
+                gen_problems = False,
+                cache = config.cache.get('cache_web', False),
+                cache_dir = config.cache.get('cache_dir'),
+            )
             all_documents.extend(lib_data['content'])
 
     # Get code from the project with attached filename

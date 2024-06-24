@@ -74,7 +74,3 @@ train:
     logging_strategy: steps
     optim: adamw_bnb_8bit
     gradient_checkpointing: True
-
-cache:
-  cache_dir: "../.cache/"
-  cache_documents: True

@@ -88,3 +88,8 @@ train:
     num_train_epochs: 2
     optim: adamw_bnb_8bit
     gradient_checkpointing: True
+
+cache:
+  cache_dir: "../.cache/"
+  cache_documents: True
+  cache_web: True

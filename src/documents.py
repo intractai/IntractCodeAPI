@@ -3,9 +3,10 @@ import hashlib
 import io
 import logging
 import os
+import pickle
 from pathlib import Path
 import re
-from typing import Callable, List, Optional, Tuple, Union
+from typing import Any, Callable, List, Optional, Tuple, Union
 import uuid
 
 from charset_normalizer import from_bytes
@@ -230,23 +231,27 @@ CONVERSION_HANDLER_REGISTRY = {
 }
 
 
-def retrieve_from_cache(byte_string: bytes, cache_dir: str):
-    """Retrieve text from cache using the input byte string hash as the key."""
-    hash = hashlib.md5(byte_string).hexdigest()
+def retrieve_from_cache(string: Union[bytes, str], cache_dir: str) -> Optional[Any]:
+    """Retrieve an object from cache using the input byte string hash as the key."""
+    if isinstance(string, str):
+        string = string.encode()
+    hash = hashlib.md5(string).hexdigest()
     cache_path = Path(cache_dir) / hash
     if cache_path.exists():
-        with open(cache_path, 'r') as f:
-            return f.read()
+        with open(cache_path, 'rb') as f:
+            return pickle.load(f)
     return None
 
 
-def save_to_cache(byte_string: bytes, cache_dir: str, text: str):
+def save_to_cache(string: Union[bytes, str], cache_dir: str, obj: Any):
     """Save text to cache using the input byte string hash as the key."""
-    hash = hashlib.md5(byte_string).hexdigest()
+    if isinstance(string, str):
+        string = string.encode()
+    hash = hashlib.md5(string).hexdigest()
     cache_path = Path(cache_dir) / hash
     os.makedirs(cache_path.parent, exist_ok=True)
-    with open(cache_path, 'w') as f:
-        f.write(text)
+    with open(cache_path, 'wb') as f:
+        pickle.dump(obj, f)
 
 
 def read_from_bytes(
