@@ -160,7 +160,9 @@ def format_ntp_inference_input(
         tokenizer: PreTrainedTokenizer,
         config: Namespace,
         file_path: Optional[str] = None,
-        max_decode_length: int = 256):
+        max_decode_length: int = 256,
+        context_length: Optional[int] = None,
+    ):
     """Format an input for next token prediction model inference.
 
     Args:
@@ -171,6 +173,8 @@ def format_ntp_inference_input(
             The path to the file to generate from. Defaults to None.
         max_decode_length (int, optional):
             The maximum length of the generated sequence. Defaults to 256.
+        context_length (Optional[int], optional):
+            Overrides context length from config when provided. Defaults to None.
     """
 
     if file_path is None:
@@ -184,8 +188,10 @@ def format_ntp_inference_input(
             max_length=MAX_FP_TOKENS,
         )[0]
 
+    context_length = context_length or config.model.context_length
+
     max_context_length = \
-        config.model.context_length - len(fp_tokens) - max_decode_length
+        context_length - len(fp_tokens) - max_decode_length
     context_tokens = tokenizer.encode(
         text,
         return_tensors='pt',
@@ -214,7 +220,9 @@ def format_fim_inference_input(
         tokenizer: PreTrainedTokenizer,
         config: Namespace,
         file_path: Optional[str] = None,
-        max_decode_length: int = 256):
+        max_decode_length: int = 256,
+        context_length: Optional[int] = None,
+    ):
     """Format an input for FIM model inference.
 
     Args:
@@ -226,6 +234,8 @@ def format_fim_inference_input(
             The path to the file to generate from. Defaults to None.
         max_decode_length (int, optional):
             The maximum length of the generated sequence. Defaults to 256.
+        context_length (Optional[int], optional):
+            Overrides context length from config when provided. Defaults to None.
     """
 
     if file_path is None:
@@ -255,8 +265,9 @@ def format_fim_inference_input(
     # The length of the prompt + generated response cannot be longer than
     # the max context length of the model
     # -4 is for the 4 FIM and BOS special tokens added to the prompt
+    context_length = context_length or config.model.context_length
     max_context_length = \
-        config.model.context_length - len(fp_tokens) - max_decode_length +  - 4
+        context_length - len(fp_tokens) - max_decode_length +  - 4
     raw_text_length = len(prefix) + len(suffix)
 
     # If the raw text is too long, truncate it
@@ -304,7 +315,9 @@ def format_inference_input(
         config: Namespace,
         proceeding_text: Optional[str] = None,
         file_path: Optional[str] = None,
-        max_decode_length: int = 256):
+        max_decode_length: int = 256,
+        context_length: Optional[int] = None,
+    ):
     """Format an input for model inference.
 
     Args:
@@ -317,11 +330,15 @@ def format_inference_input(
             The path to the file to generate from. Defaults to None.
         max_decode_length (int, optional):
             The maximum length of the generated sequence. Defaults to 256.
+        context_length (Optional[int], optional):
+            Overrides context length from config when provided. Defaults to None.
     """
-    
+
     if proceeding_text is None or not proceeding_text.strip():
         return format_ntp_inference_input(
-            preceeding_text, tokenizer, config, file_path, max_decode_length)
+            preceeding_text, tokenizer, config, file_path, max_decode_length, context_length)
     
     return format_fim_inference_input(
-        preceeding_text, proceeding_text, tokenizer, config, file_path, max_decode_length)
+        preceeding_text, proceeding_text, tokenizer, config,
+        file_path, max_decode_length, context_length,
+    )

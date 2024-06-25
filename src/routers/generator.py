@@ -5,6 +5,7 @@ from typing import Annotated, List, Optional, Union
 
 from concurrent.futures import CancelledError
 from fastapi import APIRouter, Depends
+from llama_index.core import VectorStoreIndex
 from omegaconf import DictConfig
 from pydantic import BaseModel
 from transformers import BatchEncoding, PreTrainedTokenizer
@@ -13,6 +14,7 @@ from tqdm import tqdm
 
 from src import config_handler, modeling
 from src.modeling import get_model, get_tokenizer
+from src.rag import get_vector_store
 from src.training.data_formatting import format_inference_input
 from src.users import validate_user_session
 
@@ -60,34 +62,65 @@ def generate(
     return result
 
 
-def format_input(
+def prepare_input(
         item: GenerateData,
+        config: DictConfig,
         device: Union[str, torch.device],
         tokenizer: PreTrainedTokenizer,
-        config: DictConfig,
+        vector_store: Optional[VectorStoreIndex] = None,
     ) -> BatchEncoding:
-    """Format the input for the model.
+    """Prepare and format input for the model.
 
     Depending on the input, the example will either be formatted as
     a next token prediction problem or a fill in the middle problem.
+    RAG context will also be added if enabled in the config.
     
     Args:
         item (GenerateData): The input data from a REST request.
+        config (Namespace): The config global config.
         model (Model): The model.
         tokenizer (Tokenizer): The tokenizer.
-        config (Namespace): The config global config.
+        vector_store (VectorStoreIndex, optional): The vector store for RAG. Defaults to None.
 
     Returns:
         BatchEncoding: The formatted input with input_ids and an attention_mask.
     """
-    return format_inference_input(
+    use_rag = config.rag.get('enabled', False) and vector_store is None
+
+    context_length = config.model.context_length
+    if use_rag:
+        # +10 leaves extra space for comments separating retrieved context and main code
+        context_length -= config.rag.chunk_size + 10
+
+    inputs = format_inference_input(
         preceeding_text = item.prior_context,
         tokenizer = tokenizer,
         config = config,
         proceeding_text = item.proceeding_context,
         file_path = item.file_path,
         max_decode_length = item.max_decode_length,
-    ).to(device)
+        context_length = context_length,
+    )
+
+    if not use_rag:
+        return inputs.to(device)
+    
+    # Add RAG context
+    retriever = vector_store.as_retriever(similarity_top_k=1)
+    # TODO: Make sure fim special tokens are not skipped
+    query = tokenizer.decode(inputs['input_ids'], skip_special_tokens=True)
+    result = retriever.retireve(query)[0]
+    context_str = result.node.get_content()
+
+    # Add the context to the input
+    # TODO: Add template for combining here so context and query are clearly separated
+    # Then also look into the score, maybe set a minimum score
+    # Also make sure special tokens are properly added
+    # Manually create attention mask by making use of previous one
+    input_ids = tokenizer(context_str + query, return_tensors='pt')
+
+
+
 
 
 def generate_task(item: GenerateData, config: DictConfig, username: str):
@@ -95,8 +128,9 @@ def generate_task(item: GenerateData, config: DictConfig, username: str):
 
     model = get_model(username)
     tokenizer = get_tokenizer(username)
+    vector_store = get_vector_store(username)
 
-    results = generate_completion(item, config, model, tokenizer)
+    results = generate_completion(item, config, model, tokenizer, vector_store)
     outputs = results['outputs']
     output_text = results['output_text']
 
@@ -111,8 +145,9 @@ def generate_completion(
         config: DictConfig,
         model: torch.nn.Module,
         tokenizer: PreTrainedTokenizer,
+        vector_store: Optional[VectorStoreIndex] = None,
     ) -> dict:
-    inputs = format_input(item, model.device, tokenizer, config)
+    inputs = prepare_input(item, config, model.device, tokenizer, vector_store)
 
     outputs = model.generate(
         **inputs, max_new_tokens=item.max_decode_length,
