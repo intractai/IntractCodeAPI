@@ -1,5 +1,6 @@
 defaults:
   - config
+  - override rag: debug
 
 
 model:
@@ -8,6 +9,10 @@ model:
   context_length: 512
   device: cuda
   use_flash_attention: True
+
+
+inference:
+  max_gen_length: 32
 
 
 train:

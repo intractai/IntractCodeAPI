@@ -14,7 +14,7 @@ from tqdm import tqdm
 
 from src import config_handler, modeling
 from src.modeling import get_model, get_tokenizer
-from src.rag import get_vector_store
+from src.rag import get_vector_store, retrieve_context
 from src.training.data_formatting import format_inference_input
 from src.users import validate_user_session
 
@@ -85,12 +85,21 @@ def prepare_input(
     Returns:
         BatchEncoding: The formatted input with input_ids and an attention_mask.
     """
-    use_rag = config.rag.get('enabled', False) and vector_store is None
+    use_rag = config.rag.get('enabled', False) and vector_store is not None
+    if use_rag:
+        # Create a user context string from the prior and proceeding context
+        max_len = config.rag.max_embed_context_length
+        user_context_str = item.prior_context[-max_len:]
+        if item.proceeding_context:
+            remaining_len = max_len - len(user_context_str)
+            user_context_str += item.proceeding_context[:remaining_len]
+            
+        # Then retrieve the relevant context strings from the vector store
+        retrieved = retrieve_context(user_context_str, config.rag, vector_store)
+    else:
+        retrieved = None
 
     context_length = config.model.context_length
-    if use_rag:
-        # +10 leaves extra space for comments separating retrieved context and main code
-        context_length -= config.rag.chunk_size + 10
 
     inputs = format_inference_input(
         preceeding_text = item.prior_context,
@@ -98,29 +107,12 @@ def prepare_input(
         config = config,
         proceeding_text = item.proceeding_context,
         file_path = item.file_path,
-        max_decode_length = item.max_decode_length,
+        max_decode_length = config.inference.max_gen_length,
         context_length = context_length,
+        retrieved_context = retrieved,
     )
 
-    if not use_rag:
-        return inputs.to(device)
-    
-    # Add RAG context
-    retriever = vector_store.as_retriever(similarity_top_k=1)
-    # TODO: Make sure fim special tokens are not skipped
-    query = tokenizer.decode(inputs['input_ids'], skip_special_tokens=True)
-    result = retriever.retireve(query)[0]
-    context_str = result.node.get_content()
-
-    # Add the context to the input
-    # TODO: Add template for combining here so context and query are clearly separated
-    # Then also look into the score, maybe set a minimum score
-    # Also make sure special tokens are properly added
-    # Manually create attention mask by making use of previous one
-    input_ids = tokenizer(context_str + query, return_tensors='pt')
-
-
-
+    return inputs.to(device)
 
 
 def generate_task(item: GenerateData, config: DictConfig, username: str):
@@ -150,7 +142,7 @@ def generate_completion(
     inputs = prepare_input(item, config, model.device, tokenizer, vector_store)
 
     outputs = model.generate(
-        **inputs, max_new_tokens=item.max_decode_length,
+        **inputs, max_new_tokens=config.inference.max_gen_length,
         return_dict_in_generate=True, output_scores=True,
         **GENERATION_KWARGS,
     )

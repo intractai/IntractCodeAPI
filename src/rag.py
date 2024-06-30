@@ -2,6 +2,7 @@ import logging
 import threading
 from typing import List
 
+from omegaconf import DictConfig
 from llama_index.core import Document, VectorStoreIndex
 from llama_index.core.node_parser import TokenTextSplitter
 from llama_index.embeddings.openai import OpenAIEmbedding
@@ -91,3 +92,23 @@ class VectorStoreProvider:
 def get_vector_store(username: str):
     vs_provider = VectorStoreProvider.get_instance()
     return vs_provider.get_vector_store(username)
+
+
+def retrieve_context(
+        text: str,
+        config: DictConfig,
+        vector_store: VectorStoreIndex,
+    ) -> List[str]:
+    """Retrieve the context from the vector store.
+
+    Args:
+        text: The query text.
+        config: The rag config.
+        vector_store: The vector store to retrieve the context from.
+
+    Returns:
+        str: The retrieved context.
+    """
+    retriever = vector_store.as_retriever(similarity_top_k=config.get('n_chunks_per_generation', 1))
+    results = retriever.retireve(text)
+    return [result.node.get_content() for result in results]

@@ -3,9 +3,11 @@ defaults:
   - prompts/generate_library_problems@_here_
   - rag: default
 
+
 server:
   host: 127.0.0.1
   port: 8000
+
 
 session:
   max_active_sessions: 4
@@ -13,10 +15,13 @@ session:
   max_session_idle_time: 600 # Evict sessions that have been idle for 10 minutes
   max_finetune_threads: 2 # Global maximum number of threads for fine-tuning
 
+
 database:
   path: "../db.sqlite3"
 
+
 seed: null
+
 
 model:
   save_model_dir: "../saved_models/"
@@ -40,6 +45,11 @@ model:
   quant_type: nf4
   optim: paged_adamw_32bit
   gradient_checkpointing: True
+
+
+inference:
+  max_gen_length: 128
+
 
 train:
   max_gen_length: 128 # Maximum length of generated code
@@ -89,7 +99,13 @@ train:
     optim: adamw_bnb_8bit
     gradient_checkpointing: True
 
+
 cache:
   cache_dir: "../.cache/"
   cache_documents: True
   cache_web: True
+
+
+rag:
+  max_gen_context_length: 134
+  chunk_size: 128

@@ -6,6 +6,7 @@ import logging
 from typing import Optional, Sequence
 
 from fastapi import APIRouter
+from omegaconf import DictConfig
 import torch
 from transformers.tokenization_utils_base import BatchEncoding
 from transformers import PreTrainedTokenizer
@@ -25,6 +26,7 @@ MAX_FP_TOKENS = 32 # Maximum tokens in file path
 # Labels with -100 index are ignored in the loss calculation
 # HuggingFace... document this stuff please
 IGNORE_INDEX = -100
+SHORT_CONTEXT_WARNING_THRESHOLD = 128
 
 
 # Adapted from https://github.com/EleutherAI/gpt-neox/blob/
@@ -158,50 +160,82 @@ def prepare_ntp_train_input(
 def format_ntp_inference_input(
         text: str,
         tokenizer: PreTrainedTokenizer,
-        config: Namespace,
+        config: DictConfig,
         file_path: Optional[str] = None,
         max_decode_length: int = 256,
         context_length: Optional[int] = None,
+        retrieved_context: Optional[Sequence[str]] = None,
     ):
     """Format an input for next token prediction model inference.
 
     Args:
         text (str): The text to generate from.
         tokenizer (PreTrainedTokenizer): The tokenizer.
-        config (Namespace): The config global config.
+        config (DictConfig): The config global config.
         file_path (Optional[str], optional):
             The path to the file to generate from. Defaults to None.
         max_decode_length (int, optional):
             The maximum length of the generated sequence. Defaults to 256.
         context_length (Optional[int], optional):
             Overrides context length from config when provided. Defaults to None.
+        retrieved_context (Optional[Sequence[str]], optional):
+            Additional context retrieved with the RAG retrieval system. Defaults to None.
     """
 
-    if file_path is None:
-        fp_tokens = torch.tensor([], dtype=torch.long)
-    else:
+    if file_path:
         fp_tokens = tokenizer.encode(
             f'# {file_path}\n',
-            return_tensors='pt',
-            add_special_tokens=False,
-            truncation=True,
-            max_length=MAX_FP_TOKENS,
+            return_tensors = 'pt',
+            add_special_tokens = False,
+            truncation = True,
+            max_length = MAX_FP_TOKENS,
         )[0]
+    else:
+        fp_tokens = torch.tensor([], dtype=torch.long)
+
+    if retrieved_context:
+        context_template = config.rag.context_for_generation_template
+        retrieved_context = [context_template.format(c) for c in retrieved_context]
+        retrieved_context = '\n'.join(retrieved_context)
+        retrieved_context_tokens = tokenizer.encode(
+            retrieved_context,
+            return_tensors = 'pt',
+            add_special_tokens = False,
+            truncation = True,
+            max_length = config.rag.max_gen_context_length,
+        )[0]
+    else:
+        retrieved_context_tokens = torch.tensor([], dtype=torch.long)
 
     context_length = context_length or config.model.context_length
 
     max_context_length = \
-        context_length - len(fp_tokens) - max_decode_length
+        context_length - retrieved_context_tokens - len(fp_tokens) - max_decode_length
+    
+    if max_context_length < 0:
+        raise ValueError(
+            f"The context length {context_length} is too short to fit the " + \
+            f"retrieved context ({len(retrieved_context_tokens)}), file path ({len(fp_tokens)}), " + \
+            f"and generated text ({max_decode_length})."
+        )
+    elif max_context_length <= SHORT_CONTEXT_WARNING_THRESHOLD:
+        logger.warning(
+            f"Only {max_context_length} tokens available for context after reserving space for the " + \
+            f"retrieved context ({len(retrieved_context_tokens)}), file path ({len(fp_tokens)}), " + \
+            f"and generated text ({max_decode_length}). Consider increasing the context length."
+        )
+
     context_tokens = tokenizer.encode(
         text,
-        return_tensors='pt',
-        add_special_tokens=False,
-        truncation=True,
-        max_length=max_context_length,
+        return_tensors = 'pt',
+        add_special_tokens = False,
+        truncation = True,
+        max_length = max_context_length,
     )[0]
 
     input_ids = torch.cat([
         torch.tensor([tokenizer.bos_token_id]), # TODO: FIX THIS, THERE SHOULDN'T ALWAYS BE A BOS TOKEN
+        retrieved_context_tokens,
         fp_tokens,
         context_tokens,
     ]).unsqueeze(0)
@@ -222,6 +256,7 @@ def format_fim_inference_input(
         file_path: Optional[str] = None,
         max_decode_length: int = 256,
         context_length: Optional[int] = None,
+        retrieved_context: Optional[Sequence[str]] = None,
     ):
     """Format an input for FIM model inference.
 
@@ -236,27 +271,43 @@ def format_fim_inference_input(
             The maximum length of the generated sequence. Defaults to 256.
         context_length (Optional[int], optional):
             Overrides context length from config when provided. Defaults to None.
+        retrieved_context (Optional[Sequence[str]], optional):
+            Additional context retrieved with the RAG retrieval system. Defaults to None.
     """
-
-    if file_path is None:
-        fp_tokens = torch.tensor([], dtype=torch.long)
-    else:
+    if file_path:
         fp_tokens = tokenizer.encode(
             f'# {file_path}\n',
-            return_tensors='pt',
-            add_special_tokens=False,
-            truncation=True,
-            max_length=MAX_FP_TOKENS,
+            return_tensors = 'pt',
+            add_special_tokens = False,
+            truncation = True,
+            max_length = MAX_FP_TOKENS,
         )[0]
+    else:
+        fp_tokens = torch.tensor([], dtype=torch.long)
+
+    if retrieved_context:
+        context_template = config.rag.context_for_generation_template
+        retrieved_context = [context_template.format(c) for c in retrieved_context]
+        retrieved_context = '\n'.join(retrieved_context)
+        retrieved_context_tokens = tokenizer.encode(
+            retrieved_context,
+            return_tensors = 'pt',
+            add_special_tokens = False,
+            truncation = True,
+            max_length = config.rag.max_gen_context_length,
+        )[0]
+    else:
+        retrieved_context_tokens = torch.tensor([], dtype=torch.long)
+
     prefix = tokenizer.encode(
         preceeding_text,
-        return_tensors='pt',
-        add_special_tokens=False
+        return_tensors = 'pt',
+        add_special_tokens = False
     )[0]
     suffix = tokenizer.encode(
         proceeding_text,
-        return_tensors='pt',
-        add_special_tokens=False
+        return_tensors = 'pt',
+        add_special_tokens = False
     )[0]
 
     # Get the length of the prior and proceeding context, then truncate
@@ -266,9 +317,24 @@ def format_fim_inference_input(
     # the max context length of the model
     # -4 is for the 4 FIM and BOS special tokens added to the prompt
     context_length = context_length or config.model.context_length
+    n_special_tokens = 4
     max_context_length = \
-        context_length - len(fp_tokens) - max_decode_length +  - 4
+        context_length - len(retrieved_context_tokens) - len(fp_tokens) - max_decode_length +  - n_special_tokens
     raw_text_length = len(prefix) + len(suffix)
+
+    if max_context_length < 0:
+        raise ValueError(
+            f"The context length {context_length} is too short to fit the " + \
+            f"retrieved context ({len(retrieved_context_tokens)}), file path ({len(fp_tokens)}), " + \
+            f"generated text ({max_decode_length}), and special tokens ({n_special_tokens})."
+        )
+    elif max_context_length <= SHORT_CONTEXT_WARNING_THRESHOLD:
+        logger.warning(
+            f"Only {max_context_length} tokens available for context after reserving space for the " + \
+            f"retrieved context ({len(retrieved_context_tokens)}), file path ({len(fp_tokens)}), " + \
+            f"generated text ({max_decode_length}), and special tokens ({n_special_tokens}). " + \
+            "Consider increasing the context length."
+        )
 
     # If the raw text is too long, truncate it
     if raw_text_length > max_context_length:
@@ -297,7 +363,7 @@ def format_fim_inference_input(
     # Construct the final prompt
     input_ids = torch.cat([
         torch.tensor([tokenizer.bos_token_id]),
-        torch.tensor([prefix_tok_id]), fp_tokens, prefix,
+        torch.tensor([prefix_tok_id]), retrieved_context_tokens, fp_tokens, prefix,
         torch.tensor([middle_tok_id]), suffix,
         torch.tensor([suffix_tok_id]),
     ]).unsqueeze(0)
@@ -317,6 +383,7 @@ def format_inference_input(
         file_path: Optional[str] = None,
         max_decode_length: int = 256,
         context_length: Optional[int] = None,
+        retrieved_context: Optional[Sequence[str]] = None,
     ):
     """Format an input for model inference.
 
@@ -332,13 +399,16 @@ def format_inference_input(
             The maximum length of the generated sequence. Defaults to 256.
         context_length (Optional[int], optional):
             Overrides context length from config when provided. Defaults to None.
+        retrieved_context (Optional[Sequence[str]], optional):
+            The context retrieved from the vector store. Defaults to None.
     """
 
     if proceeding_text is None or not proceeding_text.strip():
         return format_ntp_inference_input(
-            preceeding_text, tokenizer, config, file_path, max_decode_length, context_length)
+            preceeding_text, tokenizer, config, file_path,
+            max_decode_length, context_length, retrieved_context)
     
     return format_fim_inference_input(
         preceeding_text, proceeding_text, tokenizer, config,
-        file_path, max_decode_length, context_length,
+        file_path, max_decode_length, context_length, retrieved_context,
     )
