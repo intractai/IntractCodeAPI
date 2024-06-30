@@ -366,9 +366,9 @@ class ModelProvider:
         # New models are cloned from the base model, which is stored on the CPU
         # This drastically reduces load times for newly active users
         model_loader = ModelProvider._model_loaders[config.model_type](config)
-        model, model_utils = model_loader.load_model(device='cpu')
-        self._base_model_tuple = ModelTuple(model, model_utils)
         self._target_device = model_loader._determine_device()
+        model, model_utils = model_loader.load_model(device=self._target_device)
+        self._base_model_tuple = ModelTuple(model, model_utils)
 
     def _get_user_lock(self, username: str):
         """Get the lock for the user's model."""
