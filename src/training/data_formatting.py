@@ -210,7 +210,7 @@ def format_ntp_inference_input(
     context_length = context_length or config.model.context_length
 
     max_context_length = \
-        context_length - retrieved_context_tokens - len(fp_tokens) - max_decode_length
+        context_length - len(retrieved_context_tokens) - len(fp_tokens) - max_decode_length
     
     if max_context_length < 0:
         raise ValueError(

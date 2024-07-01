@@ -11,7 +11,7 @@ server:
 
 session:
   max_active_sessions: 4
-  eviction_interval: 120 # Check for idle sessions every 2 minutes
+  eviction_interval: 1800 # Check for idle sessions every 30 minutes
   max_session_idle_time: 600 # Evict sessions that have been idle for 10 minutes
   max_finetune_threads: 2 # Global maximum number of threads for fine-tuning
 
@@ -78,6 +78,7 @@ train:
   train_on_doc_code: False
   train_on_practice_problems: False # Instruction fine-tuning
   train_on_verified_solutions: False
+  train_on_documents: False
 
   # Trainer parameters
   trainer:

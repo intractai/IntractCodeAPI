@@ -20,7 +20,7 @@ from src.users import validate_user_session
 
 
 GENERATION_KWARGS = dict(
-    temperature=0.9,
+    temperature=0.7, do_sample=True, top_k=5,
     # num_beams=3, early_stopping=True, 
     # do_sample=True, temperature=1.1, top_k=3,
 )
@@ -77,7 +77,7 @@ def prepare_input(
     
     Args:
         item (GenerateData): The input data from a REST request.
-        config (Namespace): The config global config.
+        config (DictConfig): The config global config.
         model (Model): The model.
         tokenizer (Tokenizer): The tokenizer.
         vector_store (VectorStoreIndex, optional): The vector store for RAG. Defaults to None.
@@ -123,11 +123,11 @@ def generate_task(item: GenerateData, config: DictConfig, username: str):
     vector_store = get_vector_store(username)
 
     results = generate_completion(item, config, model, tokenizer, vector_store)
-    outputs = results['outputs']
     output_text = results['output_text']
 
-    score = torch.exp(outputs.sequences_scores[0]).item()
-    score = 0 if math.isnan(score) else score
+    score = results.get('perplexity').item()
+    if not math.isfinite(score):
+        score = None
 
     return {'generated_text': output_text, 'score': score}
 
@@ -149,10 +149,15 @@ def generate_completion(
 
     out_tokens = outputs.sequences[0][inputs.input_ids.shape[1]:]
     output_text = tokenizer.decode(out_tokens, skip_special_tokens=True)
+    logits = torch.stack(outputs.scores[-len(out_tokens):]).squeeze(1)
+    probs = logits.softmax(dim=1).gather(1, out_tokens.unsqueeze(1))
+
+    perplexity = torch.exp(-torch.sum(torch.log(probs)) / len(out_tokens))
 
     return {
         'outputs': outputs,
         'output_text': output_text,
+        'perplexity': perplexity,
     }
 
 

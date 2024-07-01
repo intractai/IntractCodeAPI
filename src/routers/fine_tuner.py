@@ -181,6 +181,7 @@ def finetune_task(item: ProjectFinetuneData, config: DictConfig, username: str):
         documents = collect_item_data(item, config)
         if len(documents) > 0:
             vs_provider.add_documents(username, documents)
+            logger.info(f"Stored {len(documents)} documents for user {username}.")
 
     return {"result": "success"}
 
