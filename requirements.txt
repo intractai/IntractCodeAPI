@@ -39,3 +39,4 @@ pymupdf==1.24.5
 pymupdf4llm==0.0.5
 nougat-ocr==0.1.17
 llama-index==0.10.48.post1
+nougat-ocr==0.1.17
