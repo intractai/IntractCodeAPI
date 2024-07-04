@@ -1,6 +1,7 @@
 """Data formatting utilities for model inference and training."""
 
 from argparse import Namespace
+from dataclasses import dataclass
 import numpy as np
 import logging
 from typing import Optional, Sequence
@@ -29,20 +30,65 @@ IGNORE_INDEX = -100
 SHORT_CONTEXT_WARNING_THRESHOLD = 128
 
 
+@dataclass
+class FIMTrainSample:
+    """A single FIM sample for training."""
+    preceeding_context: str
+    proceeding_context: str
+    target_text: str
+
+
+def text_to_fim_train_sample(text: str):
+    """Convert a string to a FIM sample with start, hole, and end strings.
+
+    Args:
+        text (str): The text to convert.
+
+    Returns:
+        FIMSample: The converted FIMSample object.
+    """
+    # A boundary can be = 0 (prefix will be empty)
+    # a boundary can be = len(contents) (suffix will be empty)
+    # The two boundaries can be equal (middle will be empty)
+    boundaries = list(np.random.randint(low=0, high=len(text) + 1, size=2))
+    boundaries.sort()
+
+    # start = np.random.randint(low=0, high=len(contents))
+    # mode_len = 32
+    # max_len = 192
+    # end = int(np.random.triangular(
+    #     start + 1,
+    #     start + mode_len,
+    #     max(min(len(contents), max_len), start + mode_len)))
+    # boundaries = [start, end]
+
+    return FIMTrainSample(
+        preceeding_context = text[:boundaries[0]],
+        proceeding_context = text[boundaries[1]:],
+        target_text = text[boundaries[0]:boundaries[1]],
+    )
+
+
 # Adapted from https://github.com/EleutherAI/gpt-neox/blob/
 # FIM-clean/megatron/data/gpt2_dataset.py#L339
 def prepare_fim_train_input(
-        code_tokens: Sequence[int],
-        fp_tokens: Sequence[int],
         tokenizer: PreTrainedTokenizer,
+        fp_tokens: Sequence[int],
+        code_tokens: Optional[Sequence[int]] = None,
+        fim_sample: Optional[FIMTrainSample] = None,
         truncate: bool = True):
     """
     Prepare a single training example for FIM.
 
+    Either code_tokens or fim_sample are used to generate the problem.
+    One or the other must be provided.
+
     Args:
-        code_tokens (Sequence[int]): The tokenized code.
-        fp_tokens (Sequence[int]): The tokenized file path.
         tokenizer (PreTrainedTokenizer): The tokenizer.
+        fp_tokens (Sequence[int]): The tokenized file path.
+        code_tokens (Sequence[int]): The tokenized code.
+        fim_sample (Optional[FIMTrainSample], optional):
+            The FIM sample to use. If not provided, one will be generated from the code tokens.
         truncate (bool, optional):
             Whether or not to truncate the input. Defaults to True.
 
@@ -50,40 +96,19 @@ def prepare_fim_train_input(
         Dict[str, Any]: The formatted training example.
     """
 
-    if truncate:
+    if truncate and code_tokens is not None:
         # -6 is for -3 FIM special tokens, BOS, EOS, and 1 for extra space
         code_tokens = code_tokens[:tokenizer.model_max_length - len(fp_tokens) - 6]
 
-    contents = tokenizer.decode(code_tokens, skip_special_tokens=False)
+    assert code_tokens is not None or fim_sample is not None
 
-    try:
-        # A boundary can be = 0 (prefix will be empty)
-        # a boundary can be = len(contents) (suffix will be empty)
-        # The two boundaries can be equal (middle will be empty)
-        boundaries = list(np.random.randint(low=0, high=len(contents) + 1, size=2))
-        boundaries.sort()
+    if fim_sample is None:
+        contents = tokenizer.decode(code_tokens, skip_special_tokens=False)
+        fim_sample = text_to_fim_train_sample(contents)
 
-        # start = np.random.randint(low=0, high=len(contents))
-        # mode_len = 32
-        # max_len = 192
-        # end = int(np.random.triangular(
-        #     start + 1,
-        #     start + mode_len,
-        #     max(min(len(contents), max_len), start + mode_len)))
-        # boundaries = [start, end]
-
-    except ValueError as e:
-        print(len(contents), contents)
-        print(e)
-        raise e
-
-    prefix = contents[:boundaries[0]]
-    middle = contents[boundaries[0]:boundaries[1]]
-    suffix = contents[boundaries[1]:]
-
-    prefix = np.array(tokenizer.encode(prefix, add_special_tokens=False), dtype=np.int64)
-    middle = np.array(tokenizer.encode(middle, add_special_tokens=False), dtype=np.int64)
-    suffix = np.array(tokenizer.encode(suffix, add_special_tokens=False), dtype=np.int64)
+    prefix = np.array(tokenizer.encode(fim_sample.preceeding_context, add_special_tokens=False), dtype=np.int64)
+    middle = np.array(tokenizer.encode(fim_sample.target_text, add_special_tokens=False), dtype=np.int64)
+    suffix = np.array(tokenizer.encode(fim_sample.proceeding_context, add_special_tokens=False), dtype=np.int64)
     fp_tokens = np.array(fp_tokens, dtype=np.int64)
 
     prefix_tok_id = tokenizer.vocab[FIM_BEGIN_TOKEN]
@@ -126,10 +151,12 @@ def prepare_fim_train_input(
         labels = labels,
     )
 
+
 def prepare_ntp_train_input(
         code_tokens: Sequence[int],
         fp_tokens: Sequence[int],
-        tokenizer: PreTrainedTokenizer):
+        tokenizer: PreTrainedTokenizer,
+    ):
     """
     Prepare a single training example for next token prediction.
 
@@ -156,6 +183,7 @@ def prepare_ntp_train_input(
         input_ids = input_ids,
         labels = labels,
     )
+
 
 def format_ntp_inference_input(
         text: str,
@@ -375,6 +403,7 @@ def format_fim_inference_input(
 
     return inputs
 
+
 def format_inference_input(
         preceeding_text: str,
         tokenizer: PreTrainedTokenizer,
@@ -412,3 +441,23 @@ def format_inference_input(
         preceeding_text, proceeding_text, tokenizer, config,
         file_path, max_decode_length, context_length, retrieved_context,
     )
+
+
+def format_rag_query(
+        prior_context: str,
+        proceeding_context: str = None,
+        max_length: int = 256,
+    ):
+    """Format a RAG query for retrieval using the code to be completed.
+    
+    Args:
+        prior_context (str): The text preceding the hole, or the full text if no hole.
+        proceeding_context (str, optional): The text following the hole. Defaults to None.
+        max_length (int, optional): The maximum length of the query. Defaults to 256.
+    """
+    query_str = prior_context[-max_length:]
+    if proceeding_context:
+        remaining_len = max(max_length - len(query_str), 0)
+        query_str += proceeding_context[:remaining_len]
+    return query_str
+            

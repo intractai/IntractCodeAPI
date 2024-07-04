@@ -22,11 +22,9 @@ eval:
   # Tasks
   custom_tasks: True
 
-  # Eval params
-  # total_epochs: 2
-  # epochs_per_project: 2
-  # n_finetune_projects: 5
-  # n_ood_projects: 3
+  # RAG eval
+  top_k_retrievals: 5 # Number of different potential retrievals to test
+                      # Will log the difference between the first and the best retrieval results
 
 
 train:

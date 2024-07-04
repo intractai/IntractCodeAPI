@@ -15,7 +15,7 @@ from tqdm import tqdm
 from src import config_handler, modeling
 from src.modeling import get_model, get_tokenizer
 from src.rag import get_vector_store, retrieve_context
-from src.training.data_formatting import format_inference_input
+from src.training.data_formatting import format_inference_input, format_rag_query
 from src.users import validate_user_session
 
 
@@ -88,12 +88,12 @@ def prepare_input(
     use_rag = config.rag.get('enabled', False) and vector_store is not None
     if use_rag:
         # Create a user context string from the prior and proceeding context
-        max_len = config.rag.max_embed_context_length
-        user_context_str = item.prior_context[-max_len:]
-        if item.proceeding_context:
-            remaining_len = max_len - len(user_context_str)
-            user_context_str += item.proceeding_context[:remaining_len]
-            
+        user_context_str = format_rag_query(
+            prior_context = item.prior_context,
+            proceeding_context = item.proceeding_context,
+            max_length = config.rad.max_embed_context_length,
+        )    
+        
         # Then retrieve the relevant context strings from the vector store
         retrieved = retrieve_context(user_context_str, config.rag, vector_store)
     else:

@@ -1,11 +1,11 @@
 enabled: True
 max_embed_context_length: 1024 # Maximum length of token sequence passed to embedding model for RAG
-max_gen_context_length: 262 # Maximum number of retrieved tokens that can be passed to the generation model as additional context
-                            # This number should generally be (chunk_size + ~6) * n_chunks_per_generation so that chunks do not get truncated
-                            # The extra ~5 tokens leave space for the tokens added by the `context_for_generation_template` below
+max_gen_context_length: 264 # Maximum number of retrieved tokens that can be passed to the generation model as additional context
+                            # This number should generally be (chunk_size + ~8) * n_chunks_per_generation so that chunks do not get truncated
+                            # The extra ~8 tokens leave space for the tokens added by the `context_for_generation_template` below
 n_chunks_per_generation: 1 # Number of chunks that are used as input to the generation model
 chunk_size: 256 # Size of chunks stored in vector index
 chunk_overlap: 32 # Overlap between chunks created from the same document
 embed_model: "text-embedding-3-small" # Name of OpenAI model to use for embeddings
 embed_dim: 512
-context_for_generation_template: "# Context\n\n{}\n\n"
+context_for_generation_template: "# Context\n\n{}\n\n# End context\n\n"

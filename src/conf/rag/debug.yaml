@@ -3,5 +3,5 @@ defaults:
 
 enabled: True
 max_gen_context_length: 64 # Maximum number of retrieved tokens that can be passed to the generation model as additional context
-                           # This number should generally be (chunk_size + ~6) * n_chunks_per_generation so that chunks do not get truncated
-                           # The extra ~5 tokens leave space for the tokens added by the `context_for_generation_template` below
+                           # This number should generally be (chunk_size + ~8) * n_chunks_per_generation so that chunks do not get truncated
+                           # The extra ~8 tokens leave space for the tokens added by the `context_for_generation_template` below
