@@ -28,6 +28,7 @@ MAX_FP_TOKENS = 32 # Maximum tokens in file path
 # HuggingFace... document this stuff please
 IGNORE_INDEX = -100
 SHORT_CONTEXT_WARNING_THRESHOLD = 128
+RAG_QUERY_FIM_HOLE_TOKEN = '<COMPLETION HOLE>'
 
 
 @dataclass
@@ -371,13 +372,13 @@ def format_fim_inference_input(
 
         # If both the prefix and suffix are too long, truncate both
         if len(prefix) > max_prefix_length and len(suffix) > max_suffix_length:
-            prefix = prefix[:max_prefix_length]
+            prefix = prefix[-max_prefix_length:]
             suffix = suffix[:max_suffix_length]
 
         # If just the prefix is too long, truncate it
         elif len(prefix) > max_prefix_length:
             target_length = max_context_length - len(suffix)
-            prefix = prefix[:target_length]
+            prefix = prefix[-target_length:]
 
         # If just the suffix is too long, truncate it
         else:
@@ -446,18 +447,40 @@ def format_inference_input(
 def format_rag_query(
         prior_context: str,
         proceeding_context: str = None,
-        max_length: int = 256,
+        max_length: int = 512,
     ):
     """Format a RAG query for retrieval using the code to be completed.
     
     Args:
         prior_context (str): The text preceding the hole, or the full text if no hole.
         proceeding_context (str, optional): The text following the hole. Defaults to None.
-        max_length (int, optional): The maximum length of the query. Defaults to 256.
+        max_length (int, optional): The maximum length of the query in characters. Defaults to 512.
     """
-    query_str = prior_context[-max_length:]
+    proceeding_context = proceeding_context or ''
+
     if proceeding_context:
-        remaining_len = max(max_length - len(query_str), 0)
-        query_str += proceeding_context[:remaining_len]
+        prior_context += RAG_QUERY_FIM_HOLE_TOKEN
+    
+    # Truncate in a way that we try to keep 80% of the prior context and 20% of the proceeding context
+    if len(prior_context) + len(proceeding_context) > max_length:
+        max_prefix_length = int(max_length * GEN_PRIOR_CONTEXT_FRAC)
+        max_suffix_length = max_length - max_prefix_length
+
+        # If both the prefix and suffix are too long, truncate both
+        if len(prior_context) > max_prefix_length and len(proceeding_context) > max_suffix_length:
+            prior_context = prior_context[:max_prefix_length]
+            proceeding_context = proceeding_context[:max_suffix_length]
+
+        # If just the prefix is too long, truncate it
+        elif len(prior_context) > max_prefix_length:
+            target_length = max_length - len(proceeding_context)
+            prior_context = prior_context[-target_length:]
+
+        # If just the suffix is too long, truncate it
+        else:
+            target_length = max_length - len(prior_context)
+            proceeding_context = proceeding_context[:target_length]
+
+    query_str = prior_context + proceeding_context
+
     return query_str
-            
