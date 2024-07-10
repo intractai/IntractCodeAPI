@@ -37,6 +37,9 @@ if is_accelerate_available():
     from accelerate import __version__ as accelerate_version
 
 
+CLEAR_CACHE_FREQ = 5
+
+
 logger = logging.get_logger(__name__)
 
 
@@ -148,14 +151,12 @@ class ContinualTrainer(Trainer):
         # Storage for losses/labels/inputs on CPU
         all_losses = None
         all_labels = None
-        all_inputs = None
         # Will be useful when we have an iterable dataset so don't know its length.
 
         observed_num_examples = 0
 
         losses_list = []
         labels_list = []
-        inputs_decode_list = []
         metrics_list = []
 
         # Main evaluation loop
@@ -184,7 +185,7 @@ class ContinualTrainer(Trainer):
             if loss is not None:
                 losses = self.accelerator.gather_for_metrics(
                     (loss.repeat(batch_size)))
-                losses_list.append(losses)
+                losses_list.append(losses.detach())
             if labels is not None:
                 labels = self.accelerator.pad_across_processes(
                     labels, dim=1, pad_index=-100)
@@ -195,13 +196,12 @@ class ContinualTrainer(Trainer):
                     inputs_decode, dim=1, pad_index=-100)
                 inputs_decode = self.accelerator.gather_for_metrics(
                     (inputs_decode))
-                inputs_decode_list.append(inputs_decode)
             if logits is not None:
                 logits = self.accelerator.pad_across_processes(
                     logits, dim=1, pad_index=-100)
                 if self.preprocess_logits_for_metrics is not None:
                     logits = self.preprocess_logits_for_metrics(logits, labels)
-                logits = self.accelerator.gather_for_metrics((logits))
+                logits = self.accelerator.gather_for_metrics((logits)).detach()
                 # if isinstance(logits, torch.Tensor):
                 #     # These take a LOT of memory, so let's move them to CPU ASAP
                 #     logits = logits.cpu()
@@ -222,6 +222,12 @@ class ContinualTrainer(Trainer):
 
             # These are too expensive to gather for each step
             logits = None
+            inputs_decode = None
+
+            # Also clear cuda cache, as memory on GPU can also be tied to the CPU, and when it's not cleared
+            # it can lead to CPU OOM errors or just slower performance
+            if step % CLEAR_CACHE_FREQ == 0:
+                torch.cuda.empty_cache()
 
             # Gather all tensors and put them back on the CPU if we have done enough accumulation steps.
             if (
@@ -263,9 +269,9 @@ class ContinualTrainer(Trainer):
         if losses_list is not None:
             all_losses = torch_pad_and_cat(*losses_list)
             all_losses = nested_numpify(all_losses)
-        if inputs_decode_list is not None:
-            all_inputs = torch_pad_and_cat(*inputs_decode_list)
-            all_inputs = nested_numpify(all_inputs)
+        # if inputs_decode_list is not None:
+        #     all_inputs = torch_pad_and_cat(*inputs_decode_list)
+        #     all_inputs = nested_numpify(all_inputs)
         if labels_list is not None:
             all_labels = torch_pad_and_cat(*labels_list)
             labels = nested_numpify(all_labels)
