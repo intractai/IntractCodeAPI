@@ -77,6 +77,7 @@ def prepare_fim_train_input(
         fp_tokens: Sequence[int],
         code_tokens: Optional[Sequence[int]] = None,
         fim_sample: Optional[FIMTrainSample] = None,
+        additional_context_tokens: Optional[Sequence[int]] = None,
         truncate: bool = True):
     """
     Prepare a single training example for FIM.
@@ -90,16 +91,20 @@ def prepare_fim_train_input(
         code_tokens (Sequence[int]): The tokenized code.
         fim_sample (Optional[FIMTrainSample], optional):
             The FIM sample to use. If not provided, one will be generated from the code tokens.
+            Defaults to None.
+        additional_context_tokens (Optional[Sequence[int]], optional):
+            Additional content retrieved from the vector store. Defaults to None.
         truncate (bool, optional):
             Whether or not to truncate the input. Defaults to True.
 
     Returns:
         Dict[str, Any]: The formatted training example.
     """
+    additional_context_tokens = additional_context_tokens or []
 
     if truncate and code_tokens is not None:
         # -6 is for -3 FIM special tokens, BOS, EOS, and 1 for extra space
-        code_tokens = code_tokens[:tokenizer.model_max_length - len(fp_tokens) - 6]
+        code_tokens = code_tokens[:tokenizer.model_max_length - len(additional_context_tokens) - len(fp_tokens) - 6]
 
     assert code_tokens is not None or fim_sample is not None
 
@@ -111,6 +116,7 @@ def prepare_fim_train_input(
     middle = np.array(tokenizer.encode(fim_sample.target_text, add_special_tokens=False), dtype=np.int64)
     suffix = np.array(tokenizer.encode(fim_sample.proceeding_context, add_special_tokens=False), dtype=np.int64)
     fp_tokens = np.array(fp_tokens, dtype=np.int64)
+    additional_context_tokens = np.array(additional_context_tokens, dtype=np.int64)
 
     prefix_tok_id = tokenizer.vocab[FIM_BEGIN_TOKEN]
     middle_tok_id = tokenizer.vocab[FIM_HOLE_TOKEN]
@@ -121,7 +127,9 @@ def prepare_fim_train_input(
     # we should rather truncate at the context-level
     if truncate:
         # need to make same length as the input. Take the 3 sentinel tokens into account
-        new_length = suffix.shape[0] + fp_tokens.shape[0] + prefix.shape[0] + middle.shape[0] + 3
+        new_length = \
+            suffix.shape[0] + additional_context_tokens.shape[0] \
+            + fp_tokens.shape[0] + prefix.shape[0] + middle.shape[0] + 3
         diff = new_length - tokenizer.model_max_length
         if diff > 0: # too long
             # If there's no space to truncate the suffix:
@@ -132,7 +140,7 @@ def prepare_fim_train_input(
 
     input_ids = np.concatenate([
         [tokenizer.bos_token_id],
-        [prefix_tok_id], fp_tokens, prefix,
+        [prefix_tok_id], additional_context_tokens, fp_tokens, prefix,
         [middle_tok_id], suffix,
         [suffix_tok_id], middle,
         [tokenizer.eos_token_id]
@@ -141,7 +149,7 @@ def prepare_fim_train_input(
     # Ignore the prompt tokens when calculating loss
     labels = np.concatenate([
         [tokenizer.bos_token_id],
-        [IGNORE_INDEX] * (len(fp_tokens) + len(prefix) + 1),
+        [IGNORE_INDEX] * (len(additional_context_tokens) + len(fp_tokens) + len(prefix) + 1),
         [IGNORE_INDEX] * (len(suffix) + 1),
         [IGNORE_INDEX], middle,
         [tokenizer.eos_token_id]
@@ -157,6 +165,7 @@ def prepare_ntp_train_input(
         code_tokens: Sequence[int],
         fp_tokens: Sequence[int],
         tokenizer: PreTrainedTokenizer,
+        additional_context_tokens: Optional[Sequence[int]] = None,
     ):
     """
     Prepare a single training example for next token prediction.
@@ -165,20 +174,25 @@ def prepare_ntp_train_input(
         code_tokens (Sequence[int]): The tokenized code.
         fp_tokens (Sequence[int]): The tokenized file path.
         tokenizer (PreTrainedTokenizer): The tokenizer.
+        additional_context_tokens (Optional[Sequence[int]], optional):
+            Additional content retrieved from the vector store. Defaults to None.
 
     Returns:
         Dict[str, Any]: The formatted training example.
     """
+    additional_context_tokens = additional_context_tokens or []
+
     input_ids = [tokenizer.bos_token_id] + \
+        additional_context_tokens + \
         fp_tokens + \
         code_tokens + \
         [tokenizer.eos_token_id] # TODO: FIX THIS, EOS SHOULD BE PUT INTO CODE BEFORE IT IS CHUNKED
 
     labels = [tokenizer.bos_token_id] + \
+        len(additional_context_tokens) * [IGNORE_INDEX] + \
         len(fp_tokens) * [IGNORE_INDEX] + \
         code_tokens + \
         [tokenizer.eos_token_id]
-
 
     return dict(
         input_ids = input_ids,

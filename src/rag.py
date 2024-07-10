@@ -1,9 +1,11 @@
 import logging
 import threading
-from typing import List
+from typing import List, Optional
 
 from omegaconf import DictConfig
 from llama_index.core import Document, VectorStoreIndex
+from llama_index.core.indices.base_retriever import BaseRetriever
+# from llama_index.core.base_retriever import BaseRetriever
 from llama_index.core.node_parser import TokenTextSplitter
 from llama_index.embeddings.openai import OpenAIEmbedding
 
@@ -77,6 +79,10 @@ class VectorStoreProvider:
     def add_documents(self, username: str, documents: List[str]):
         """Add documents to the RAG model of the given user."""
         vector_store = self.get_vector_store(username)
+        self._add_documents_to_vs(vector_store, documents)
+
+    def _add_documents_to_vs(self, vector_store: VectorStoreIndex, documents: List[str]):
+        """Add documents to the vector store."""
         for doc in documents:
             vector_store.insert(Document(text=doc))
 
@@ -102,19 +108,27 @@ def get_vector_store(username: str):
 
 def retrieve_context(
         text: str,
-        config: DictConfig,
-        vector_store: VectorStoreIndex,
+        vector_store: Optional[VectorStoreIndex],
+        retriever: Optional[BaseRetriever] = None,
+        top_k: int = 1,
     ) -> List[str]:
     """Retrieve the context from the vector store.
 
     Args:
         text: The query text.
-        config: The rag config.
         vector_store: The vector store to retrieve the context from.
+        top_k: The number of chunks to retrieve. Defaults to 1.
 
     Returns:
         str: The retrieved context.
     """
-    retriever = vector_store.as_retriever(similarity_top_k=config.get('n_chunks_per_generation', 1))
+    assert vector_store is not None or retriever is not None, "Either vector_store or retriever must be provided."
+
+    if not text:
+        return None
+    
+    if retriever is None:
+        retriever = vector_store.as_retriever(similarity_top_k=top_k)
+
     results = retriever.retrieve(text)
     return [result.node.get_content() for result in results]

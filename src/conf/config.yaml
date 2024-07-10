@@ -108,5 +108,5 @@ cache:
 
 
 rag:
-  max_gen_context_length: 134
-  chunk_size: 128
+  max_gen_context_length: 192
+  chunk_size: 512

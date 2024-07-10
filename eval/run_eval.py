@@ -8,301 +8,32 @@ Objectives of the eval:
 
 from dataclasses import dataclass
 import datetime
-import json
 import logging
 import os
-from pathlib import Path
 import random
 import sys
-from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
-import warnings
+from typing import Any, Dict, List
 
 import hydra
-import numpy as np
 from omegaconf import DictConfig, OmegaConf
 import pandas as pd
-import torch
-from torch.nn import functional as F
 from transformers import PreTrainedModel, PreTrainedTokenizer
-from transformers.trainer_utils import EvalPrediction
 
 sys.path.append('../')
 from src import config_handler
-# from src import finetune, modeling
-# from src.data_formatting import IGNORE_INDEX, FIM_HOLE_TOKEN
 from src.modeling import ModelProvider, FIM_HOLE_TOKEN
 from src.routers.fine_tuner import finetune_model, ProjectFinetuneData
 from src.training import finetune
-from src.training.finetune import IGNORE_INDEX
 from benchmarks import run_human_eval_benchmark
+from data_loading import load_task_info
+from utils import *
+from metrics import *
 
-
-# Relative to this file
-DATA_DIR = 'data/'
-METADATA_FILENAME = 'metadata.json'
-TASK_TRAIN_DIR = 'train/'
-TASK_TEST_DIR = 'test/'
-TASK_CODE_DIR = 'code/'
-TASK_DOCS_DIR = 'documents/'
-TASK_LINKS_FILENAME = 'links.txt'
 
 VALID_BENCHMARKS = ['human_eval']
 
-WANDB_PROJECT = 'backend_finetune_eval'
-
 
 logger = logging.getLogger(__name__)
-
-
-def combine_project_data(multi_project_data: Dict[str, Dict[str, str]]) -> Dict[str, str]:
-    """Combine data from multiple projects into a single dictionary.
-
-    Args:
-        multi_project_data: Dictionary mapping project names to dictionaries mapping
-            file names to file contents.
-
-    Returns:
-        Dictionary mapping file names to file contents.
-    """
-
-    all_data = {}
-    for project_name, project_data in multi_project_data.items():
-        for file_path, file_data in project_data.items():
-            all_data[os.path.join(project_name, file_path)] = file_data
-
-    return all_data
-
-
-def load_projects(
-        relative_path: str, combine_projects: bool = True,
-    ) -> Union[Dict[str, Dict[str, str]], Dict[str, str]]:
-    """Load project data from a directory.
-
-    Args:
-        relative_path: Path to directory containing projects.
-        combine_projects: Whether to combine data from multiple projects into a single, flat dictionary.
-
-    Returns:
-        Dictionary mapping project names to dictionaries mapping file names to file contents.
-        If `combine_projects` is True, returns a single dictionary mapping file names to file contents.
-    """
-    all_project_data = {}
-    data_dir = Path(__file__).parent / relative_path
-    # Loop through each project in this directory
-    for i, project_path in enumerate(data_dir.glob('*')):
-        if project_path.is_dir():
-            project_data = {}
-            # Loop through each file in this project
-            for file_path in project_path.rglob('*'):
-                if file_path.is_file():
-                    try:
-                        with open(file_path, 'r', encoding='utf-8') as f:
-                            file_text = f.read()
-                        if len(file_text) > 0:
-                            # Path to file starting from the name of the project folder
-                            rel_path = file_path.relative_to(project_path.parent)
-                            project_data[str(rel_path)] = file_text
-                    except UnicodeDecodeError:
-                        logging.warning(f'Error reading file {file_path}. Skipping...')
-            all_project_data[project_path.name] = project_data
-
-    if combine_projects:
-        all_project_data = combine_project_data(all_project_data)
-
-    return all_project_data
-
-
-def load_documents(relative_path: str) -> List[str]:
-    """Load documents from a directory.
-
-    Args:
-        relative_path: Path to directory containing documents.
-
-    Returns:
-        List of document texts.
-    """
-    all_documents = []
-    data_dir = Path(__file__).parent / relative_path
-    for doc_path in data_dir.glob('**/*'):
-        if doc_path.is_file():
-            with open(doc_path, 'rb') as f:
-                doc_bytes = f.read()
-            if len(doc_bytes) > 0:
-                all_documents.append((doc_path.name, doc_bytes))
-                logger.debug(f'Loaded document: {doc_path}')
-
-    return all_documents
-
-
-def load_links(relative_path: str) -> List[str]:
-    """Load links from a file.
-
-    Args:
-        relative_path: Path to file containing links.
-
-    Returns:
-        List of links.
-    """
-    all_links = []
-    data_dir = Path(__file__).parent / relative_path
-    with open(data_dir, 'r', encoding='utf-8') as f:
-        for line in f:
-            if len(line.strip()) > 0:
-                all_links.append(line.strip())
-
-    return all_links
-
-
-def load_task_info() -> Iterator[Tuple[str, Dict[str, Any]]]:
-    """Load all the info (code, documents, and links) for a single eval task.
-    Args:
-        relative_path: Path to file containing task information.
-
-    Returns:
-        Tuple of task name and dictionary containing task information.
-    """
-    data_dir = Path(__file__).parent / DATA_DIR
-    # Get all folders in the directory (1 folder = 1 task)
-    for task_path in data_dir.glob('*'):
-        if task_path.is_dir():
-            task_info = {'train': {}, 'test': {}, 'metadata': {}}
-            task_name = task_path.name
-
-            # Paths to relevant files / directories
-            metadata_path = task_path / METADATA_FILENAME
-            train_path = task_path / TASK_TRAIN_DIR
-            code_path = train_path / TASK_CODE_DIR
-            docs_path = train_path / TASK_DOCS_DIR
-            links_path = train_path / TASK_LINKS_FILENAME
-            test_path = task_path / TASK_TEST_DIR
-
-            # Load metadata
-            if metadata_path.is_file():
-                with open(metadata_path, 'r', encoding='utf-8') as f:
-                    metadata = json.load(f)
-                task_info['metadata'] = metadata
-
-            # Load train data
-            if code_path.is_dir():
-                task_info['train']['code'] = load_projects(code_path)
-            if docs_path.is_dir():
-                task_info['train']['docs'] = load_documents(docs_path)
-            if links_path.is_file():
-                task_info['train']['links'] = load_links(links_path)
-
-            # Load test data
-            if test_path.is_dir():
-                task_info['test'] = load_projects(test_path)
-
-            if len(task_info['train']) == 0:
-                logger.warning(f'Task {task_name} has no train data. Skipping...')
-                continue
-            elif len(task_info['test']) == 0:
-                logger.warning(f'Task {task_name} has no test data. Skipping...')
-                continue
-
-            yield task_name, task_info
-
-
-def compute_metrics(
-        eval_preds: EvalPrediction,
-        fim_token_id: Optional[int] = None,
-    ) -> Dict[str, float]:
-    """Compute metrics for finetuning.
-    
-    Args:
-        eval_preds: Evaluation predictions from a model.
-        fim_token_id: Token ID for the FIM token. If None, FIM loss will not be calculated.
-    
-    Returns:
-        Dictionary mapping metric names to metric values.
-    """
-
-    logits, labels, inputs = eval_preds
-
-    # Shift logits and labels over by one
-    logits = logits[:, :-1, :]
-    labels = labels[:, 1:]
-
-    # Gather all preds and labels where the label is not -100
-    preds = logits.argmax(2)
-    no_ignore_idxs = (labels != IGNORE_INDEX)
-
-    select_preds = preds[no_ignore_idxs]
-    select_labels = labels[no_ignore_idxs]
-
-    # Calculate the accuracy
-    n_correct = (select_preds == select_labels).sum()
-    n_tokens = no_ignore_idxs.sum()
-
-    # Calculate the mean loss
-    losses = F.cross_entropy(
-        input = logits.swapaxes(1, 2),
-        target = labels,
-        ignore_index = IGNORE_INDEX,
-        reduction = 'none'
-    )
-
-    if fim_token_id is not None:
-        # Check which inputs had the FIM token
-        fim_idxs = (inputs == fim_token_id).any(1)
-        # Calculate how many tokens there are in each category
-        n_fim_tokens = no_ignore_idxs[fim_idxs].sum()
-        # Calculate the total loss for each category
-        fim_loss = losses[fim_idxs].sum()
-    else:
-        n_fim_tokens = torch.tensor(float('nan'))
-        fim_loss = torch.tensor(float('nan'))
-
-    n_ntp_tokens = no_ignore_idxs[~fim_idxs].sum()
-    ntp_loss = losses[~fim_idxs].sum()
-
-    return {
-        'n_tokens': n_tokens,
-        'n_fim_tokens': n_fim_tokens,
-        'n_ntp_tokens': n_ntp_tokens,
-        'n_correct': n_correct,
-        'fim_loss': fim_loss,
-        'ntp_loss': ntp_loss,
-        # 'accuracy': accuracy,
-        # 'combined_loss': combined_loss,
-    }
-
-
-def collate_metrics(metrics_list: List[Dict[str, float]]) -> Dict[str, float]:
-    """Collate metrics from multiple runs.
-
-    Args:
-        metrics_list: List of dictionaries mapping metric names to metric values.
-
-    Returns:
-        Dictionary mapping metric names to metric values.
-    """
-
-    # Initialize the collated metrics
-    collated_metrics = {}
-    sum_metrics = {}
-
-    # First, sum each of the metrics
-    for metric_name in metrics_list[0].keys():
-        sum_metrics[metric_name] = 0
-        for metrics in metrics_list:
-            sum_metrics[metric_name] += metrics[metric_name]
-
-    collated_metrics['accuracy'] = sum_metrics['n_correct'] / sum_metrics['n_tokens']
-    collated_metrics['fim_loss'] = sum_metrics['fim_loss'] / sum_metrics['n_fim_tokens']
-    collated_metrics['ntp_loss'] = sum_metrics['ntp_loss'] / sum_metrics['n_ntp_tokens']
-    collated_metrics['combined_loss'] = \
-        (sum_metrics['fim_loss'] + sum_metrics['ntp_loss']) / sum_metrics['n_tokens']
-
-    return collated_metrics
-
-
-def create_new_model_tuple(model_provider: ModelProvider):
-    """Create a new model and tokenizer."""
-    model, model_utils = model_provider.create_new_model_tuple()
-    tokenizer = model_utils['tokenizer']
-    return model, tokenizer
 
 
 def run_benchmarks(
@@ -366,15 +97,12 @@ def run_task_eval(
     return metrics
 
 
-@dataclass
-class EvalResults:
-    """Results from running evaluation on a set of tasks and/or benchmarks."""
-    task_metrics: List[Dict[str, Any]]
-    benchmark_metrics: List[Dict[str, Any]]
-
-
 def run_eval(config: DictConfig, model_provider: ModelProvider):
     """Run evaluation steps for finetuning."""
+
+    # Make a random seed that will be used for both pre- and post-finetune eval
+    # This is required to keep the FIM examples the same for both runs
+    eval_seed = random.randint(0, 2**32 - 1)
 
     ### Run benchmarks ###
 
@@ -398,10 +126,6 @@ def run_eval(config: DictConfig, model_provider: ModelProvider):
 
     if not config['eval'].get('custom_tasks', True):
         return EvalResults([], benchmark_metrics)
-
-    # Make a random seed that will be used for both pre- and post-finetune eval
-    # This is required to keep the FIM examples the same for both runs
-    eval_seed = random.randint(0, 2**32 - 1)
 
     # Load name of all eval tasks
     task_metrics = []
@@ -478,72 +202,11 @@ def run_eval(config: DictConfig, model_provider: ModelProvider):
     return EvalResults(task_metrics, benchmark_metrics)
 
 
-def save_metrics(eval_results: EvalResults, config: DictConfig):
-    """Save evaluation metrics to a file and/or wandb depending on the config.
-    
-    Args:
-        eval_results: Results from running evaluation on a set of tasks and/or benchmarks.
-        config: Configuration for saving metrics.
-    """
-    task_metrics_df = pd.DataFrame(eval_results.task_metrics)
-    benchmark_metrics_df = pd.DataFrame(eval_results.benchmark_metrics)
-
-    output_dir = config['eval'].get('metrics_output_dir')
-    if output_dir:
-        logger.info(f"Saving metrics to {output_dir}...")
-        # Get datetime for the output file
-        now = datetime.datetime.now()
-        output_dir = os.path.join(output_dir, now.strftime('%Y-%m-%d_%H-%M-%S'))
-
-        os.makedirs(output_dir, exist_ok=True)
-
-        # Save to csv
-        task_metrics_df.to_csv(os.path.join(output_dir, 'task_metrics.csv'), index=False)
-        benchmark_metrics_df.to_csv(os.path.join(output_dir, 'benchmark_metrics.csv'), index=False)
-
-    if config.get('wandb', False):
-        logger.info("Logging to wandb...")
-        import wandb
-        wandb.init(project=WANDB_PROJECT, config=config)
-        wandb.log({'task_metrics': task_metrics_df, 'benchmark_metrics': benchmark_metrics_df})
-
-
-def configure_logging():
-    """Configure logging for the server."""
-    logger.setLevel(logging.INFO)
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setLevel(logging.INFO)
-    formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-    # add log in the file
-    handler = logging.FileHandler('../eval_log.txt')
-    handler.setLevel(logging.INFO)
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-
-    warnings.filterwarnings('ignore', message=".*Could not load referrer policy.*")
-    trafilatura_logger = logging.getLogger('trafilatura')
-    trafilatura_logger.setLevel(logging.INFO)
-    lite_llm = logging.getLogger('LiteLLM')
-    lite_llm.setLevel(logging.INFO)
-
-
-def set_seed(seed: Optional[int] = None):
-    """Set the random seed for reproducibility."""
-    if seed is not None:
-        random.seed(seed)
-        np.random.seed(seed)
-        torch.manual_seed(seed)
-
-
 @hydra.main(version_base=None, config_path='../src/conf', config_name='eval')
 def main(config: DictConfig):
 
     # Start logging and config
-    configure_logging()
+    configure_logging(logger)
     config = OmegaConf.create(config)
     logger.info(f"Loaded config: {config}")
 
@@ -557,7 +220,7 @@ def main(config: DictConfig):
     # Run eval
     logger.info("Running eval...")
     eval_results = run_eval(config, model_provider)
-    save_metrics(eval_results, config)
+    save_metrics(eval_results, config, logger)
 
 
 if __name__ == '__main__':

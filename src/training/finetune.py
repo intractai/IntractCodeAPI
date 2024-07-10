@@ -224,13 +224,14 @@ def project_to_problems(
 def problems_to_train_samples(
         elements: Dict[str, Any],
         tokenizer: transformers.PreTrainedTokenizer,
+        additional_context_max_length: Optional[int] = None,
     ) -> Dict[str, Any]:
     """Converts train problems to samples formatted for training.
     
     Args:
         elements (Dict[str, Any]): The dataset elements to convert.
             Should contain columns 'prior_context', 'proceeding_context', 'target_text',
-            'file_path', and 'sample_type'.
+            'file_path', 'sample_type', and optionally, 'additional_context'.
         tokenizer (transformers.PreTrainedTokenizer): The tokenizer to use.
 
     Returns:
@@ -243,11 +244,24 @@ def problems_to_train_samples(
     file_path_tokens = tokenizer([f'# {fp}' for fp in elements['file_path']], add_special_tokens=False).input_ids
     code_tokens = tokenizer(elements['prior_context'], add_special_tokens=False).input_ids
 
+    # Format and tokenize additional context (usually from RAG)
+    if 'additional_context' in elements:
+        truncate = additional_context_max_length is not None
+        additional_context_tokens = tokenizer(
+            elements['additional_context'], add_special_tokens=False,
+            truncation=truncate, max_length=additional_context_max_length,
+        ).input_ids
+    else:
+        additional_context_tokens = [[] for _ in elements['prior_context']]
+
     for i in range(len(elements['sample_type'])):
 
         # Handle next token prediction formatting
         if elements['sample_type'][i] == 'ntp':
-            sample = prepare_ntp_train_input(code_tokens[i], file_path_tokens[i], tokenizer)
+            sample = prepare_ntp_train_input(
+                code_tokens[i], file_path_tokens[i], tokenizer,
+                additional_context_tokens=additional_context_tokens[i],
+            )
 
             input_ids.append(sample['input_ids'])
             labels.append(sample['labels'])
@@ -257,7 +271,10 @@ def problems_to_train_samples(
         elif elements['sample_type'][i] == 'fim':
             fim_data = FIMTrainSample(
                 elements['prior_context'][i], elements['proceeding_context'][i], elements['target_text'][i])
-            fim_sample = prepare_fim_train_input(tokenizer, file_path_tokens[i], fim_sample=fim_data)
+            fim_sample = prepare_fim_train_input(
+                tokenizer, file_path_tokens[i], fim_sample=fim_data,
+                additional_context_tokens=additional_context_tokens[i],
+            )
 
             if fim_sample is None:
                 warnings.warn("FIM sample was too long, skipping")

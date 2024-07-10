@@ -72,3 +72,7 @@ train:
     logging_strategy: steps
     optim: adamw_bnb_8bit
     gradient_checkpointing: True
+
+rag:
+  max_gen_context_length: 264
+  chunk_size: 768

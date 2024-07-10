@@ -91,11 +91,11 @@ def prepare_input(
         user_context_str = format_rag_query(
             prior_context = item.prior_context,
             proceeding_context = item.proceeding_context,
-            max_length = config.rad.max_embed_context_length,
+            max_length = config.rag.max_embed_context_length,
         )    
         
         # Then retrieve the relevant context strings from the vector store
-        retrieved = retrieve_context(user_context_str, config.rag, vector_store)
+        retrieved = retrieve_context(user_context_str, vector_store, top_k=config.rag.n_chunks_per_generation)
     else:
         retrieved = None
 
