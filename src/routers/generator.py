@@ -1,7 +1,7 @@
 from functools import partial
 import logging
 import math
-from typing import Annotated, List, Optional, Union
+from typing import Annotated, List, Dict, Optional, Union
 
 from concurrent.futures import CancelledError
 from fastapi import APIRouter, Depends
@@ -13,20 +13,15 @@ import torch
 from tqdm import tqdm
 
 from src import config_handler, modeling
-from src.modeling import get_model, get_tokenizer
+from src.modeling import get_inference_model
 from src.rag import get_vector_store, retrieve_context
 from src.training.data_formatting import format_inference_input, format_rag_query
 from src.users import validate_user_session
 
 
-GENERATION_KWARGS = dict(
-    temperature=0.7, do_sample=True, top_k=5,
-    # num_beams=3, early_stopping=True, 
-    # do_sample=True, temperature=1.1, top_k=3,
-)
-
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
 
 class GenerateData(BaseModel):
     """Data class for the /generate endpoint.
@@ -65,7 +60,6 @@ def generate(
 def prepare_input(
         item: GenerateData,
         config: DictConfig,
-        device: Union[str, torch.device],
         tokenizer: PreTrainedTokenizer,
         vector_store: Optional[VectorStoreIndex] = None,
     ) -> BatchEncoding:
@@ -78,12 +72,11 @@ def prepare_input(
     Args:
         item (GenerateData): The input data from a REST request.
         config (DictConfig): The config global config.
-        model (Model): The model.
         tokenizer (Tokenizer): The tokenizer.
         vector_store (VectorStoreIndex, optional): The vector store for RAG. Defaults to None.
 
     Returns:
-        BatchEncoding: The formatted input with input_ids and an attention_mask.
+        Dict: The formatted input with input_ids and an attention_mask.
     """
     use_rag = config.rag.get('enabled', False) and vector_store is not None
     if use_rag:
@@ -112,17 +105,17 @@ def prepare_input(
         retrieved_context = retrieved,
     )
 
-    return inputs.to(device)
+    return inputs
 
 
 def generate_task(item: GenerateData, config: DictConfig, username: str):
     logging.info(f"Generating text for user: {username}.")
 
-    model = get_model(username)
-    tokenizer = get_tokenizer(username)
+    model = get_inference_model(username)
+    # tokenizer = get_tokenizer(username)
     vector_store = get_vector_store(username)
 
-    results = generate_completion(item, config, model, tokenizer, vector_store)
+    results = model.generate_completion(item, config, model, vector_store)
     output_text = results['output_text']
 
     score = results.get('perplexity').item()
@@ -130,35 +123,6 @@ def generate_task(item: GenerateData, config: DictConfig, username: str):
         score = None
 
     return {'generated_text': output_text, 'score': score}
-
-
-def generate_completion(
-        item: GenerateData,
-        config: DictConfig,
-        model: torch.nn.Module,
-        tokenizer: PreTrainedTokenizer,
-        vector_store: Optional[VectorStoreIndex] = None,
-    ) -> dict:
-    inputs = prepare_input(item, config, model.device, tokenizer, vector_store)
-
-    outputs = model.generate(
-        **inputs, max_new_tokens=config.inference.max_gen_length,
-        return_dict_in_generate=True, output_scores=True,
-        **GENERATION_KWARGS,
-    )
-
-    out_tokens = outputs.sequences[0][inputs.input_ids.shape[1]:]
-    output_text = tokenizer.decode(out_tokens, skip_special_tokens=True)
-    logits = torch.stack(outputs.scores[-len(out_tokens):]).squeeze(1)
-    probs = logits.softmax(dim=1).gather(1, out_tokens.unsqueeze(1))
-
-    perplexity = torch.exp(-torch.sum(torch.log(probs)) / len(out_tokens))
-
-    return {
-        'outputs': outputs,
-        'output_text': output_text,
-        'perplexity': perplexity,
-    }
 
 
 def batch_generate_completions(

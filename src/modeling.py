@@ -7,21 +7,24 @@ import logging
 import os
 import threading
 import types
-from typing import NamedTuple, Tuple
+from typing import NamedTuple, Tuple, Union, Any, Optional
 
+from vllm import LLM, SamplingParams
 import bitsandbytes as bnb
 from huggingface_hub import snapshot_download
+from llama_index.core import VectorStoreIndex
+from omegaconf import DictConfig
 from peft import (
     prepare_model_for_kbit_training,
     LoraConfig,
     get_peft_model
 )
 import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM
-from transformers import BitsAndBytesConfig
+from transformers import AutoTokenizer, AutoModelForCausalLM, PreTrainedTokenizer
+from transformers import BitsAndBytesConfig, BatchEncoding, GenerationConfig
 
+from src.routers.generator import prepare_input, GenerateData
 from src.users import SessionTracker
-
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +52,112 @@ def set_main_thread_id():
     GLOBAL_MAIN_THREAD_ID = threading.get_ident()
 
 
+class ModelWrapper(abc.ABC):
+
+    def __init__(self, model: Union[torch.nn.Module, LLM]):
+        self._wrapped_model = model
+        self._tokenizer = None
+    
+    def __getattr__(self, name):
+        # Delegate attribute access to the wrapped instance
+        return getattr(self._wrapped_model, name)
+    
+    def __setattr__(self, name, value):
+        if name == '_wrapped_model':
+            super().__setattr__(name, value)
+        else:
+            setattr(self._wrapped_model, name, value)
+    
+    def __delattr__(self, name):
+        delattr(self._wrapped_model, name)
+
+    @abc.abstractmethod
+    def generate_completion(
+            self, 
+            item: GenerateData,
+            config: DictConfig,
+            vector_store: Optional[VectorStoreIndex] = None,
+        ) -> dict:
+        pass
+
+    def _prepare_input(
+            self, 
+            item: GenerateData,
+            tokenizer: PreTrainedTokenizer,
+            config: DictConfig,
+            vector_store: Optional[VectorStoreIndex] = None,
+        ) -> BatchEncoding:
+        return prepare_input(item, config, tokenizer, vector_store)
+
+
+class VLLMWrapper(ModelWrapper):
+
+    _sampling_params = SamplingParams(temperature=0.75, top_k=5)
+    
+    def generate_completion(
+            self, 
+            item: GenerateData,
+            config: DictConfig,
+            vector_store: Optional[VectorStoreIndex] = None,
+        ) -> dict:
+
+        input_ids = self._prepare_input(item, config, self.get_tokenizer(), vector_store).input_ids.tolist()
+
+        outputs = self.generate(prompt_token_ids=input_ids, sampling_params=self._sampling_params)
+
+        output_text = outputs[0].outputs[0].text
+
+        perplexity = 0 #TODO: calculate perplexity later
+        return {
+            'outputs': outputs,
+            'output_text': output_text,
+            'perplexity': perplexity,
+        } 
+    
+
+class HuggingFaceModelWrapper(ModelWrapper):
+
+    GENERATION_KWARGS = dict(
+        temperature=0.7, do_sample=True, top_k=5,
+        # num_beams=3, early_stopping=True, 
+        # do_sample=True, temperature=1.1, top_k=3,
+    )
+
+    _generation_config = GenerationConfig(
+        temperature=0.7, top_k=5, do_sample=True,
+    )
+
+    def generate_completion(
+            self, 
+            item: GenerateData,
+            config: DictConfig,
+            vector_store: Optional[VectorStoreIndex] = None,
+        ) -> dict:
+
+        tokenizer = get_tokenizer()
+
+        inputs = self._prepare_input(item, config, tokenizer, vector_store).to(self.device)
+
+        outputs = self.generate(
+            **inputs, max_new_tokens=config.inference.max_gen_length,
+            return_dict_in_generate=True, output_scores=True,
+            **self.GENERATION_KWARGS,
+        )
+
+        out_tokens = outputs.sequences[0][inputs.input_ids.shape[1]:]
+        output_text = tokenizer.decode(out_tokens, skip_special_tokens=True)
+        logits = torch.stack(outputs.scores[-len(out_tokens):]).squeeze(1)
+        probs = logits.softmax(dim=1).gather(1, out_tokens.unsqueeze(1))
+
+        perplexity = torch.exp(-torch.sum(torch.log(probs)) / len(out_tokens))
+
+        return {
+            'outputs': outputs,
+            'output_text': output_text,
+            'perplexity': perplexity,
+        }
+
+
 class ModelLoader(abc.ABC):
     """This class has the responsibility of providing the functionality to load the model and its utilities, including tokenizer.
 
@@ -56,6 +165,11 @@ class ModelLoader(abc.ABC):
         config (Namespace): The configuration object.
     """
 
+    _model_wrappers = {
+        'vllm': VLLMWrapper,
+        'huggingface': HuggingFaceModelWrapper
+    }
+    
     def __init__(self, config: Namespace):
         self._config = config
 
@@ -105,6 +219,15 @@ class ModelLoader(abc.ABC):
     def load_model(self) -> Tuple[torch.nn.Module, dict]:
         pass
 
+    def load_inference_model(self) -> Tuple[Union[LLM, torch.nn.Module], dict]:
+        model, utils = self._load_inference_model()
+        model = self._model_wrappers[self._config.inference_model_type](model)
+        return model, utils
+    
+    @abc.abstractmethod
+    def _load_inference_model(self) -> Tuple[Union[LLM, torch.nn.Module], dict]:
+        pass
+       
 
 def make_synchronous_func(tokenizer, lock, source_func):
     def new_func(*args, **kwargs):
@@ -168,6 +291,8 @@ class SynchronizedTokenizer():
         return result
 
 
+
+
 class StandardModelLoader(ModelLoader):
 
     def load_model(self, device=None) -> Tuple[torch.nn.Module, dict]:
@@ -207,6 +332,17 @@ class StandardModelLoader(ModelLoader):
         GLOBAL_MAIN_THREAD_ID = threading.get_ident()
 
         return model, {'tokenizer': SynchronizedTokenizer.from_tokenizer(tokenizer)}
+    
+    def _load_inference_model(self) -> Tuple[Union[LLM, torch.nn.Module], dict]:
+        model_name = self._config.model_name
+
+        model = LLM(
+                model=model_name,
+                gpu_memory_utilization=0.4,
+                enable_lora=False
+            )
+        
+        return model, {}
 
 
 class LoraModelLoader(ModelLoader):
@@ -259,6 +395,17 @@ class LoraModelLoader(ModelLoader):
         GLOBAL_MAIN_THREAD_ID = threading.get_ident()
 
         return model, {'tokenizer': tokenizer}
+    
+    def _load_inference_model(self) -> Tuple[Union[LLM, torch.nn.Module], dict]:
+        model_name = self._config.model_name
+
+        model = LLM(
+                model=model_name,
+                gpu_memory_utilization=0.4,
+                enable_lora=True
+            )
+        
+        return model, {}
 
 
 class QLoraModelLoader(ModelLoader):
@@ -324,6 +471,9 @@ class QLoraModelLoader(ModelLoader):
         GLOBAL_MAIN_THREAD_ID = threading.get_ident()
 
         return model, {'tokenizer': tokenizer}
+    
+    def _load_inference_model(self) -> Tuple[Union[LLM, torch.nn.Module], dict]:
+        ValueError('VLLM is not supporting QLORA yet!')
 
 
 # Named tuple for model and model utilities
@@ -361,6 +511,7 @@ class ModelProvider:
         # Initialize the model here
         self.config = config
         self._models: dict[str, ModelTuple] = {}
+        self._inference_models: dict[str, ModelTuple] = {}
         self._user_locks = {} # Locks for each user's model
 
         # New models are cloned from the base model, which is stored on the CPU
@@ -368,7 +519,9 @@ class ModelProvider:
         model_loader = ModelProvider._model_loaders[config.model_type](config)
         self._target_device = model_loader._determine_device()
         model, model_utils = model_loader.load_model(device=self._target_device)
+        inf_model, inf_model_utils = model_loader.load_inference_model() #NOTE: VLLM only works in GPU mode for now
         self._base_model_tuple = ModelTuple(model, model_utils)
+        self._base_inf_model_tuple = ModelTuple(inf_model, inf_model_utils)
 
     def _get_user_lock(self, username: str):
         """Get the lock for the user's model."""
@@ -412,6 +565,21 @@ class ModelProvider:
                 model = self._models[username].model
                 self._register_preemption_hooks(model, username)
             return self._models[username]
+        
+    def get_inference_model_tuple(self, username: str) -> ModelTuple: 
+        """Get the inference model and model utilities for the user."""
+        # TODO: think about how to use a single inference model in the case of multiple users
+        with self._get_user_lock(username): # TODO: the inference and training lock should be different
+            if username not in self._inference_models:
+                self._inference_models[username] = self.create_new_model_tuple()
+                # TODO: figure out forward hook is required for vllm like models
+                # model = self._inf_models[username].model
+                # self._register_preemption_hooks(model, username) 
+
+            return self._inference_models[username]
+        
+    def get_inference_model(self, username: str):
+        return self.get_inference_model_tuple(username).model
 
     def get_model(self, username: str):
         return self.get_model_tuple(username).model
@@ -457,3 +625,8 @@ def get_model_utils(username: str):
 def get_tokenizer(username: str):
     model_utils = get_model_utils(username)
     return model_utils['tokenizer']
+
+
+def get_inference_model(username: str):
+    model_provider = ModelProvider.get_instance()
+    return model_provider.get_inference_model(username)

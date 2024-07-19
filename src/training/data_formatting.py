@@ -283,6 +283,13 @@ def format_ntp_inference_input(
         context_tokens,
     ]).unsqueeze(0)
 
+    # attention_mask = input_ids.ne(tokenizer.pad_token_id).long()
+    
+    # return dict(
+    #     input_ids = input_ids, 
+    #     attention_mask = attention_mask
+    # )
+
     inputs = BatchEncoding({
         'input_ids': input_ids,
         'attention_mask': input_ids.ne(tokenizer.pad_token_id).long(),
@@ -410,6 +417,13 @@ def format_fim_inference_input(
         torch.tensor([middle_tok_id]), suffix,
         torch.tensor([suffix_tok_id]),
     ]).unsqueeze(0)
+
+    # attention_mask = input_ids.ne(tokenizer.pad_token_id).long()
+
+    # return dict(
+    #     input_ids = input_ids, 
+    #     attention_mask = attention_mask
+    # )
 
     inputs = BatchEncoding({
         'input_ids': input_ids,
