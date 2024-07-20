@@ -23,6 +23,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+GENERATION_KWARGS = dict(
+    temperature=0.7, do_sample=True, top_k=5,
+    # num_beams=3, early_stopping=True, 
+    # do_sample=True, temperature=1.1, top_k=3,
+)
+
 class GenerateData(BaseModel):
     """Data class for the /generate endpoint.
     
