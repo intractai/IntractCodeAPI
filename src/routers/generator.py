@@ -13,7 +13,7 @@ import torch
 from tqdm import tqdm
 
 from src import config_handler, modeling
-from src.modeling import get_inference_model
+from src.modeling.model_hub import get_inference_model
 from src.rag import get_vector_store, retrieve_context
 from src.training.data_formatting import format_inference_input, format_rag_query
 from src.users import validate_user_session
@@ -57,57 +57,6 @@ def generate(
     return result
 
 
-def prepare_input(
-        item: GenerateData,
-        config: DictConfig,
-        tokenizer: PreTrainedTokenizer,
-        vector_store: Optional[VectorStoreIndex] = None,
-    ) -> BatchEncoding:
-    """Prepare and format input for the model.
-
-    Depending on the input, the example will either be formatted as
-    a next token prediction problem or a fill in the middle problem.
-    RAG context will also be added if enabled in the config.
-    
-    Args:
-        item (GenerateData): The input data from a REST request.
-        config (DictConfig): The config global config.
-        tokenizer (Tokenizer): The tokenizer.
-        vector_store (VectorStoreIndex, optional): The vector store for RAG. Defaults to None.
-
-    Returns:
-        Dict: The formatted input with input_ids and an attention_mask.
-    """
-    use_rag = config.rag.get('enabled', False) and vector_store is not None
-    if use_rag:
-        # Create a user context string from the prior and proceeding context
-        user_context_str = format_rag_query(
-            prior_context = item.prior_context,
-            proceeding_context = item.proceeding_context,
-            max_length = config.rag.max_embed_context_length,
-        )    
-        
-        # Then retrieve the relevant context strings from the vector store
-        retrieved = retrieve_context(user_context_str, vector_store, top_k=config.rag.n_chunks_per_generation)
-    else:
-        retrieved = None
-
-    context_length = config.model.context_length
-
-    inputs = format_inference_input(
-        preceeding_text = item.prior_context,
-        tokenizer = tokenizer,
-        config = config,
-        proceeding_text = item.proceeding_context,
-        file_path = item.file_path,
-        max_decode_length = config.inference.max_gen_length,
-        context_length = context_length,
-        retrieved_context = retrieved,
-    )
-
-    return inputs
-
-
 def generate_task(item: GenerateData, config: DictConfig, username: str):
     logging.info(f"Generating text for user: {username}.")
 
@@ -115,10 +64,10 @@ def generate_task(item: GenerateData, config: DictConfig, username: str):
     # tokenizer = get_tokenizer(username)
     vector_store = get_vector_store(username)
 
-    results = model.generate_completion(item, config, model, vector_store)
+    results = model.generate_completion(item, config, vector_store)
     output_text = results['output_text']
 
-    score = results.get('perplexity').item()
+    score = results.get('perplexity')
     if not math.isfinite(score):
         score = None
 

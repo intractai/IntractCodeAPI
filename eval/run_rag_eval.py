@@ -31,7 +31,8 @@ sys.path.append('../')
 from src import config_handler
 # from src import finetune, modeling
 # from src.data_formatting import IGNORE_INDEX, FIM_HOLE_TOKEN
-from src.modeling import ModelProvider, FIM_HOLE_TOKEN
+from src.modeling.model_provider import ModelProvider
+from src.modeling.tokens import FIM_HOLE_TOKEN
 from src.rag import retrieve_context, VectorStoreProvider
 from src.routers.fine_tuner import collect_item_data, finetune_model, ProjectFinetuneData
 from src.training import finetune

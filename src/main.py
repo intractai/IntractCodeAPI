@@ -12,7 +12,9 @@ from fastapi.staticfiles import StaticFiles
 
 sys.path.append('../')
 from src import config_handler, database
-from src.modeling import ModelProvider, set_main_thread_id
+from src.session import set_main_thread_id
+from src.modeling.model_provider import ModelProvider
+
 from src.rag import VectorStoreProvider
 from src.routers import auth, fine_tuner, generator
 from src.users import SessionTracker
