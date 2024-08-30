@@ -18,6 +18,12 @@ def create_new_model_tuple(model_provider: ModelProvider):
     return model, tokenizer
 
 
+class OpenAIRequestLogFilter(logging.Filter):
+    """Filter out the OpenAI request log."""
+    def filter(self, record):
+        return 'HTTP Request: POST https://api.openai.com' not in record.getMessage()
+    
+
 def configure_logging(logger):
     """Configure logging for the server."""
     logger.setLevel(logging.INFO)
@@ -39,6 +45,11 @@ def configure_logging(logger):
     trafilatura_logger.setLevel(logging.INFO)
     lite_llm = logging.getLogger('LiteLLM')
     lite_llm.setLevel(logging.INFO)
+
+    httpx_logger = logging.getLogger('httpx')
+    httpx_logger.setLevel(logging.INFO)
+
+    httpx_logger.addFilter(OpenAIRequestLogFilter())
     
 
 def set_seed(seed: Optional[int] = None):
