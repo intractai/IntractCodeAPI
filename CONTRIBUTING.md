@@ -55,6 +55,7 @@ The project also supports SFT with rejection sampling, particularly for training
   - `data_formatting.py` - Handles data preparation and formatting for training, including functions for tokenization and dataset creation.
   - `finetune.py` - Implements the fine-tuning process, including dataset processing, model configuration, and training loop management.
   - `trainer.py` - Extends the Hugging Face Trainer class to provide custom training functionality. It includes modifications for continual learning, custom evaluation, and memory optimizations.
+  - `interactive/` - Contains files for multi-step SFT with rejection sampling. This folder includes implementations for generating and evaluating solutions to programming problems and handling multi-step training processes. It supports features like automated problem generation, solution verification, and iterative improvement of model responses.
 - `crawler/` - Contains files for web scraping and document extraction. The crawler functionality uses libraries like Scrapy and BeautifulSoup to extract content from web pages and documentation sites, with explicit support for both GitHub repositories and web-based documentation. It includes utilities for finding documentation URLs and processing HTML content.
 
 ## I Have a Question
