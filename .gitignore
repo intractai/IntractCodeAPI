@@ -171,4 +171,7 @@ src/outputs/
 
 # scrapped data
 scrapped_docs/*
-llms/*
+*_env/
+
+# vscode
+.vscode*

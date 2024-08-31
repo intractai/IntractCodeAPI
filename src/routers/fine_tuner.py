@@ -16,13 +16,14 @@ from src import config_handler
 from src.auto_generation.problem_generator import LibraryProblemGenerator
 from src.crawler.docs_scraper import get_doc_data
 from src.documents import read_from_bytes, retrieve_from_cache, save_to_cache
-from src.modeling import get_model, get_tokenizer
+from src.modeling.model_hub import get_model, get_tokenizer
 from src.rag import VectorStoreProvider
 from src.training import finetune
 from src.training.interactive.train_multi_step_sft import (
     generate_solutions,
     train_multi_step_sft_with_verification,
 )
+from src.types import ProjectFinetuneData
 from src.users import SessionTracker, validate_user_session
 
 
@@ -32,14 +33,6 @@ FINETUNE_THREAD_IDS = set()
 logger = logging.getLogger(__name__)
 router = APIRouter()
 global_finetune_lock = threading.Lock()
-
-
-class ProjectFinetuneData(BaseModel):
-    project_dict: Optional[Dict[str, str]] = None
-    language: Optional[str] = None
-    libraries: Optional[List[str]] = None
-    urls: Optional[List[str]] = None
-    documents: Optional[List[Tuple[str, bytes]]] = None
 
 
 # @router.get('/learn/project')

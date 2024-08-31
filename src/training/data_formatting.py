@@ -7,13 +7,16 @@ import logging
 from typing import Optional, Sequence
 
 from fastapi import APIRouter
+from llama_index.core import VectorStoreIndex
 from omegaconf import DictConfig
 import torch
 from transformers.tokenization_utils_base import BatchEncoding
 from transformers import PreTrainedTokenizer
 
-from src.modeling import FIM_BEGIN_TOKEN, FIM_HOLE_TOKEN, FIM_END_TOKEN
 
+from src.modeling.tokens import FIM_BEGIN_TOKEN, FIM_HOLE_TOKEN, FIM_END_TOKEN
+from src.rag import retrieve_context
+from src.types import GenerateData
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -29,6 +32,57 @@ MAX_FP_TOKENS = 32 # Maximum tokens in file path
 IGNORE_INDEX = -100
 SHORT_CONTEXT_WARNING_THRESHOLD = 128
 RAG_QUERY_FIM_HOLE_TOKEN = '<COMPLETION HOLE>'
+
+
+def prepare_input(
+        item: GenerateData,
+        config: DictConfig,
+        tokenizer: PreTrainedTokenizer,
+        vector_store: Optional[VectorStoreIndex] = None,
+    ) -> BatchEncoding:
+    """Prepare and format input for the model.
+
+    Depending on the input, the example will either be formatted as
+    a next token prediction problem or a fill in the middle problem.
+    RAG context will also be added if enabled in the config.
+    
+    Args:
+        item (GenerateData): The input data from a REST request.
+        config (DictConfig): The config global config.
+        tokenizer (Tokenizer): The tokenizer.
+        vector_store (VectorStoreIndex, optional): The vector store for RAG. Defaults to None.
+
+    Returns:
+        Dict: The formatted input with input_ids and an attention_mask.
+    """
+    use_rag = config.rag.get('enabled', False) and vector_store is not None
+    if use_rag:
+        # Create a user context string from the prior and proceeding context
+        user_context_str = format_rag_query(
+            prior_context = item.prior_context,
+            proceeding_context = item.proceeding_context,
+            max_length = config.rag.max_embed_context_length,
+        )    
+        
+        # Then retrieve the relevant context strings from the vector store
+        retrieved = retrieve_context(user_context_str, vector_store, top_k=config.rag.n_chunks_per_generation)
+    else:
+        retrieved = None
+
+    context_length = config.model.context_length
+
+    inputs = format_inference_input(
+        preceeding_text = item.prior_context,
+        tokenizer = tokenizer,
+        config = config,
+        proceeding_text = item.proceeding_context,
+        file_path = item.file_path,
+        max_decode_length = config.inference.max_gen_length,
+        context_length = context_length,
+        retrieved_context = retrieved,
+    )
+
+    return inputs
 
 
 @dataclass
@@ -283,6 +337,13 @@ def format_ntp_inference_input(
         context_tokens,
     ]).unsqueeze(0)
 
+    # attention_mask = input_ids.ne(tokenizer.pad_token_id).long()
+    
+    # return dict(
+    #     input_ids = input_ids, 
+    #     attention_mask = attention_mask
+    # )
+
     inputs = BatchEncoding({
         'input_ids': input_ids,
         'attention_mask': input_ids.ne(tokenizer.pad_token_id).long(),
@@ -410,6 +471,13 @@ def format_fim_inference_input(
         torch.tensor([middle_tok_id]), suffix,
         torch.tensor([suffix_tok_id]),
     ]).unsqueeze(0)
+
+    # attention_mask = input_ids.ne(tokenizer.pad_token_id).long()
+
+    # return dict(
+    #     input_ids = input_ids, 
+    #     attention_mask = attention_mask
+    # )
 
     inputs = BatchEncoding({
         'input_ids': input_ids,

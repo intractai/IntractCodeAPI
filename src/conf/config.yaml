@@ -45,6 +45,9 @@ model:
   quant_type: nf4
   optim: paged_adamw_32bit
   gradient_checkpointing: True
+  
+  # inference model parameters
+  inference_model_type: vllm
 
 
 inference:

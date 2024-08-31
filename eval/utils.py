@@ -8,7 +8,7 @@ import numpy as np
 import torch
 
 sys.path.append('../')
-from src.modeling import ModelProvider
+from src.modeling.model_provider import ModelProvider
 
 
 def create_new_model_tuple(model_provider: ModelProvider):

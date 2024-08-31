@@ -21,7 +21,8 @@ from transformers import PreTrainedModel, PreTrainedTokenizer
 
 sys.path.append('../')
 from src import config_handler
-from src.modeling import ModelProvider, FIM_HOLE_TOKEN
+from src.modeling.model_provider import ModelProvider
+from src.modeling.tokens import FIM_HOLE_TOKEN
 from src.routers.fine_tuner import finetune_model, ProjectFinetuneData
 from src.training import finetune
 from benchmarks import run_human_eval_benchmark
