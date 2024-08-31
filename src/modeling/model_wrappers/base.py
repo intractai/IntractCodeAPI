@@ -7,6 +7,8 @@ from transformers import PreTrainedTokenizer, BatchEncoding
 from llama_index.core import VectorStoreIndex
 
 from src.training.data_formatting import prepare_input
+from src.types import GenerateData
+
 
 
 class ModelWrapper(abc.ABC):
@@ -36,7 +38,7 @@ class ModelWrapper(abc.ABC):
     @abc.abstractmethod
     def generate_completion(
             self, 
-            item: 'GenerateData',
+            item: GenerateData,
             config: DictConfig,
             vector_store: Optional[VectorStoreIndex] = None,
         ) -> dict:
@@ -44,7 +46,7 @@ class ModelWrapper(abc.ABC):
 
     def _prepare_input(
             self, 
-            item: 'GenerateData',
+            item: GenerateData,
             config: DictConfig,
             tokenizer: PreTrainedTokenizer,
             vector_store: Optional[VectorStoreIndex] = None,

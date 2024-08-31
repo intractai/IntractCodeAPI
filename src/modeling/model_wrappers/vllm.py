@@ -5,7 +5,7 @@ from llama_index.core import VectorStoreIndex
 from omegaconf import DictConfig
 
 from src.modeling.model_wrappers.base import ModelWrapper
-
+from src.types import GenerateData
 
 class VLLMWrapper(ModelWrapper):
 
@@ -13,7 +13,7 @@ class VLLMWrapper(ModelWrapper):
     
     def generate_completion(
             self, 
-            item: 'GenerateData',
+            item: GenerateData,
             config: DictConfig,
             vector_store: Optional[VectorStoreIndex] = None,
         ) -> dict:

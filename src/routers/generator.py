@@ -16,6 +16,7 @@ from src import config_handler, modeling
 from src.modeling.model_hub import get_inference_model
 from src.rag import get_vector_store, retrieve_context
 from src.training.data_formatting import format_inference_input, format_rag_query
+from src.types import GenerateData
 from src.users import validate_user_session
 
 
@@ -28,23 +29,6 @@ GENERATION_KWARGS = dict(
     # num_beams=3, early_stopping=True, 
     # do_sample=True, temperature=1.1, top_k=3,
 )
-
-class GenerateData(BaseModel):
-    """Data class for the /generate endpoint.
-    
-    Args:
-        file_path (str): The path to the file to generate from.
-        prior_context (str): The prior context to generate from.
-        proceeding_context (Optional[str], optional): 
-            The proceeding context to generate from. Defaults to None.
-            If provided, FIM is used, otherwise next token prediction is used.
-        max_decode_length (int, optional):
-            The maximum length of the generated sequence. Defaults to 128.
-    """
-    file_path: Optional[str] = None
-    prior_context: str
-    proceeding_context: Optional[str] = None
-    max_decode_length: int = 256
 
 
 @router.post('/generate')

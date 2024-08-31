@@ -7,14 +7,16 @@ import logging
 from typing import Optional, Sequence
 
 from fastapi import APIRouter
+from llama_index.core import VectorStoreIndex
 from omegaconf import DictConfig
 import torch
 from transformers.tokenization_utils_base import BatchEncoding
 from transformers import PreTrainedTokenizer
 
+
 from src.modeling.tokens import FIM_BEGIN_TOKEN, FIM_HOLE_TOKEN, FIM_END_TOKEN
 from src.rag import retrieve_context
-
+from src.types import GenerateData
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -33,10 +35,10 @@ RAG_QUERY_FIM_HOLE_TOKEN = '<COMPLETION HOLE>'
 
 
 def prepare_input(
-        item: 'GenerateData',
+        item: GenerateData,
         config: DictConfig,
         tokenizer: PreTrainedTokenizer,
-        vector_store: Optional['VectorStoreIndex'] = None,
+        vector_store: Optional[VectorStoreIndex] = None,
     ) -> BatchEncoding:
     """Prepare and format input for the model.
 

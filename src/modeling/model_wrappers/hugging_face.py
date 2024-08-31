@@ -6,7 +6,7 @@ from omegaconf import DictConfig
 from transformers import GenerationConfig, PreTrainedTokenizer
 
 from src.modeling.model_wrappers.base import ModelWrapper
-
+from src.types import GenerateData
 
 class HuggingFaceModelWrapper(ModelWrapper):
 
@@ -24,7 +24,7 @@ class HuggingFaceModelWrapper(ModelWrapper):
 
     def generate_completion(
             self, 
-            item: 'GenerateData',
+            item: GenerateData,
             config: DictConfig,
             vector_store: Optional[VectorStoreIndex] = None,
         ) -> dict:
