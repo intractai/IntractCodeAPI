@@ -1,46 +1,112 @@
-# Docker Agent
 
-This Docker image is based on the Python 3 slim image and includes the transformers and dioc libraries.
+# Intract Code API
 
-## Building the Docker Image
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python Version](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/downloads/)
 
-To build the Docker image, navigate to the directory containing the Dockerfile and run the following command:
+An API designed for code completion and fine-tuning of open-source large language models on internal codebases and documents. 
+
+## ✨ **Key Features**
+
+- 🚀 **Code Completion API**: Seamlessly integrate advanced code suggestions into your development process.
+- ⚙️ **Custom Fine-tuning**: Personalize models to your company's codebase and internal knowledge, including support for documents and PDFs.
+- 📈 **Fine-tuning Techniques**: Supports Standard, LoRA, and QLoRA fine-tuning methods.
+- 👥 **Multi-user Support**: Run multiple users with different models on a shared server.
+- 🧠 **Retrieval-Augmented Generation (RAG)**: Experimental feature enabling context-aware generation.
+
+---
+
+## 🚀 **Quick Start**
+
+Get started with just a few commands:
+
+1. **Build the Docker image:**
+   ```bash
+   docker build -t docker_agent .
+   ```
+
+2. **Start the Docker container:**
+   ```bash
+   docker run -p 8000:8000 -it --rm --name docker_agent docker_agent
+   ```
+
+   - Binds port `8000` on the host to port `8000` on the container.
+   - Removes the container when it stops.
+   - Uses the `deepseek-ai/deepseek-coder-1.3b-base` model by default.
+
+3. **Access the API:**
+   Once the container is running, you can access the API documentation and test the endpoints by opening a web browser and navigating to:
+   ```
+   http://localhost:8000/docs
+   ```
+   This will open the Swagger UI, where you can explore and interact with the available API endpoints.
+
+
+---
+
+## 🔥 **Enable GPU Acceleration**
+
+Unlock GPU acceleration by adding the `--gpus all` flag:
 
 ```bash
-docker build -t docker_agent .
+docker run -p 8000:8000 --gpus all -it --rm --name docker_agent docker_agent
 ```
 
-## Starting the Docker Container
+---
 
-To start the Docker container, run the following command:
+## 🔧 **Configuration and Parameter Customization**
 
-```bash
-docker run -p 8000:8000 -it --rm --name docker_agent docker_agent
-```
-This will start the container and bind port 8000 on the host to port 8000 on the container. The container will be removed when it is stopped. By default the container will use the `deepseek-ai/deepseek-coder-1.3b-base` model. To use a different model, set the `MODEL_NAME` environment variable when starting the container. For example, to use the `bert-large-uncased` model, add the `-e MODEL_NAME=bert-large-uncased` flag to the `docker run` command. To use GPU acceleration, add the `--gpus all` flag to the `docker run` command.
+The model's behavior and training parameters can be customized by modifying the `src/conf/config.yaml` file. Key configuration options include:
 
-## Finetune hyperparameters
+### Model Configuration
+- `model_name`: Set the model to use (default: deepseek-ai/deepseek-coder-1.3b-base)
+- `context_length`: Set the context length for the model (default: 512)
+- `device`: Choose the device to run the model on (default: cpu)
+- `use_flash_attention`: Enable or disable flash attention (default: False)
 
-To change the finetune hyperparameters, the environment variables must start with `FINETUNE_`. For example, to change the number of epochs to 2, add the `-e FINETUNE_NUM_TRAIN_EPOCHS=2` flag to the `docker run` command. The parameters that can be changed are same as the `transformers.TrainingArguments` class, and model arguments for the model being finetuned. For more information, see the [documentation](https://huggingface.co/docs/transformers/v4.35.2/en/main_classes/trainer#transformers.TrainingArguments).
+### Fine-tuning Method Selection
+You can switch between different fine-tuning methods by adjusting the following parameters:
 
-### Finetune on project directories
-When an entire project data is passed, the dataset consists of a code completion task for the entire project, and multiple code insertion tasks. The code insertion tasks are randomly generated for each file in the project directory. The hyperparameters controlling the code insertion tasks are as follows:
-num_code_insertions_per_file
-- `FINETUNE_NUM_CODE_INSERTIONS_PER_FILE`: Number of code insertion tasks per file. Default: 10
-- `FINETUNE_SPAN_MAX`: Range of code insertion spans. Default: 256
+#### Standard Fine-tuning
+Set `model_type: standard` in the configuration.
 
-## Testing the Docker Container
+#### LoRA (Low-Rank Adaptation)
+Set `model_type: lora` and adjust these parameters:
+- `lora_r`: Rank of the LoRA update matrices (default: 64)
+- `lora_alpha`: LoRA scaling factor (default: 16)
+- `lora_dropout`: Dropout probability for LoRA layers (default: 0.01)
 
-To test the Docker container, run the following command:
+#### QLoRA (Quantized LoRA)
+Set `model_type: qlora` and adjust these parameters:
+- `bits`: Quantization bits (default: 4)
+- `double_quant`: Enable double quantization (default: True)
+- `quant_type`: Quantization data type (default: nf4)
+- `optim`: Optimizer for QLoRA (default: paged_adamw_32bit)
+- `gradient_checkpointing`: Enable gradient checkpointing (default: True)
 
-```bash
-python client/call_agent.py "<INPUT TEXT>"
-``` 
+### Training Configuration
+- `max_gen_length`: Maximum length of generated code (default: 128)
+- `max_revision_steps`: Maximum number of code revision steps (default: 2)
+- `use_ntp` and `use_fim`: Enable/disable specific training techniques
+- `train_on_code`, `train_on_docs`, etc.: Configure what to train on
 
-To run a sample finetune on project directories, run the following command:
+For a complete list of configurable parameters, refer to the `src/conf/config.yaml` file in the project repository.
 
-```bash
-python client/finetune_agent.py
-```
+---
 
-To access the API documentation, navigate to `http://localhost:8000/docs` in your browser.
+## 📄 **Documentation**
+
+Explore the full API documentation by visiting `http://localhost:8000/docs` after starting the server.
+
+---
+
+## 🤝 **Contributing**
+
+We welcome contributions! Please check out our [Contributing Guide](CONTRIBUTING.md) for details.
+
+---
+
+## 📝 **License**
+
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for more information.
+
