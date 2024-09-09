@@ -100,9 +100,88 @@ Explore the full API documentation by visiting `http://localhost:8000/docs` afte
 
 ---
 
+## 🧠 **How Fine-Tuning Works**
+
+Our fine-tuning process is versatile and powerful, supporting multiple approaches:
+
+### 🔄 Types of Fine-Tuning
+- Self-supervised learning
+    - Next Token Prediction (NTP)
+    - Fill-in-the-Middle (FIM)
+- Supervised fine-tuning (SFT) with rejection sampling
+
+### 🛠️ Fine-Tuning Techniques
+- Standard fine-tuning
+- LoRA (Low-Rank Adaptation)
+- QLoRA (Quantized LoRA)
+
+Standard fine-tuning will provide the best results, but it is also the most expensive. LoRA and QLoRA use less memory, but may not be as accurate, and were slower in our experiments.
+
+### 🤖 Self-Supervised Fine-Tuning
+We employ two main techniques:
+1. **Next Token Prediction (NTP)**: Trains the model to predict the next token in a sequence.
+2. **Fill-in-the-Middle (FIM)**: Masks out a portion of the input and trains the model to reconstruct it.
+
+These methods can be applied to various data sources:
+- User's codebase
+- Documentation text
+- Code snippets extracted from documentation
+- Auto-generated problems and solutions
+- External documents (text files and PDFs)
+
+The fine-tuning process is highly configurable through the config file:
+- Choose data sources: `train_on_code`, `train_on_docs`, `train_on_doc_code`, `train_on_practice_problems`, `train_on_verified_solutions`, `train_on_documents`
+- Select training methods: `use_ntp`, `use_fim`
+
+### 🎯 SFT with Rejection Sampling
+This approach entails generating and solving synthetic problems to improve the model's performance. The full process entails the following steps:
+
+1. Automatically generate problem statements
+2. Model produces multiple solutions for each problem
+3. Solutions are executed and evaluated automatically
+4. This process is repeated for a number of iterations until a solution is found or the maximum number of revisions is reached.
+5. The model is trained on the solved problems and their solutions.
+
+Key features:
+- Allows iterative improvement without human intervention
+- Automatically assesses solution correctness
+- Creates a feedback loop for continual refinement
+
+This method leverages the fact that judging solution correctness is often easier than generating correct solutions from scratch, enabling the model to enhance its problem-solving skills over multiple iterations.
+
+---
+
+## 🏗️ **Project Structure**
+
+- `main.py` - Entry point to running the server.
+- `modeling.py` - Handles the construction, loading, and management of language models and tokenizers. It includes:
+  - A `ModelLoader` class for creating models with various configurations.
+  - A `ModelProvider` singleton class that manages model instances for multiple users, allowing retrieval of user-specific models.
+  - Utility functions and classes to support model operations and tokenization.
+- `config_handler.py` - Contains a singleton class `ConfigProvider` that manages the configuration for the server. It provides methods to initialize the configuration, retrieve the configuration instance, and access the configuration data.
+- `database.py` - Manages database operations and connections through a `DatabaseProvider` singleton class, including table creation and connection handling.
+- `users.py` - Manages user sessions, authentication, and token handling through a `SessionTracker` singleton and various utility functions. The `SessionTracker` maintains active user sessions, handles user eviction based on inactivity, and manages user-specific resources like models and vector stores.
+- `rag.py` - Implements the Retrieval-Augmented Generation (RAG) functionality through a `VectorStoreProvider` singleton class. It manages vector stores for each user, handles document insertion, and provides methods for context retrieval during inference.
+- `documents.py` - Handles document processing and conversion, including PDF to text conversion using different libraries (Nougat and PyMuPDF). It also provides caching mechanisms for processed documents and utility functions for handling various document formats.
+- `routers/` - Contains the API endpoints for different functionalities:
+  - `generator.py` - Handles text generation requests and responses.
+  - `fine_tuner.py` - Manages the fine-tuning process for models based on user input.
+  - `auth.py` - Handles user authentication, registration, and token management.
+- `static/` - Contains static files for authentication and login that are no longer used.
+- `training/` - Contains files related to model training and fine-tuning:
+  - `data_formatting.py` - Handles data preparation and formatting for training, including functions for tokenization and dataset creation.
+  - `finetune.py` - Implements the fine-tuning process, including dataset processing, model configuration, and training loop management.
+  - `trainer.py` - Extends the Hugging Face Trainer class to provide custom training functionality. It includes modifications for continual learning, custom evaluation, and memory optimizations.
+  - `interactive/` - Contains files for multi-step SFT with rejection sampling. This folder includes implementations for generating and evaluating solutions to programming problems and handling multi-step training processes. It supports features like automated problem generation, solution verification, and iterative improvement of model responses.
+- `crawler/` - Contains files for web scraping and document extraction. The crawler functionality uses libraries like Scrapy and BeautifulSoup to extract content from web pages and documentation sites, with explicit support for both GitHub repositories and web-based documentation. It includes utilities for finding documentation URLs and processing HTML content.
+
+---
+
 ## 🤝 **Contributing**
 
-We welcome contributions! Please check out our [Contributing Guide](CONTRIBUTING.md) for details.
+> If you want to constribute, we assume that you have read the rest of this document.
+
+We are not longer actively working on this project, and we don't plan to make any updates. If you still want to contribute knowing that, you are welcome to start by making an [Issue](/issues/new) to ask if it is something we would approve. If you do make a pull request, please do your best to follow the [Google Python Style Guide](https://google.github.io/styleguide/pyguide.html).
 
 ---
 
