@@ -1,10 +1,24 @@
 # Evaluation
 
-This directory contains scripts for evaluating how the finetune endpoint affects performance on a project and general coding benchmarks.
+This directory contains scripts for evaluating how the finetune endpoint affects performance on a project and general coding benchmarks. Note that the eval was a WIP when this project was archived. The basic eval script is functional, but the RAG eval script is not feature complete.
 
 ## Running the Evaluation
 
-WIP
+To run an eval, you first need to add your own data as described in the [Evaluation Algorithm](#evaluation-algorithm) section below. The data should mimic the types of projects you might want to finetune and get suggestions for.
+
+You can run the evaluation by navigating to the `eval` directory and running the following command:
+
+```bash
+python run_eval.py
+```
+
+You can run eval RAG specific performance by running the following command:
+
+```bash
+python run_rag_eval.py
+```
+
+The purpose of the RAG eval is to test how much RAG improves performance on a project. Note that RAG with generic pretrained models did **not** help in our experiments, and the feature implementation was incomplete. We do not recommend using RAG unless you plan to build on the existing implementation.
 
 ## Objectives of the Evaluation
 
@@ -19,13 +33,13 @@ WIP
     ```
     metadata.json
     data/{project_name}/
-        train/
+        train/  # This is the code that will be fine-tuned on
             code/
                 {code_file_and_dirs}
             documents/
                 {doc_file_and_dirs} (currently unused, in the future could support documents like PDFs)
             links.txt (each link should be separated by a newline)
-        test/
+        test/  # This is the code for which we will generate suggestions
             {test_code_file_and_dirs}
     ```
 
@@ -57,4 +71,4 @@ WIP
 
 Each project directory should contain a `metadata.json` file with the following fields:
 - `test_type`: one of `related`, `unrelated`
-- `generic_benchmarks`: a list of generic benchmarks to evaluate on, valid values: {`HumanEval`, `MBPP`, `all`}
+- `generic_benchmarks`: a list of generic benchmarks to evaluate on, valid values: {`HumanEval`, `all`}
