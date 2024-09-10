@@ -29,10 +29,10 @@ model:
   model_name: ${oc.env:MODEL_NAME, deepseek-ai/deepseek-coder-1.3b-base}
   model_type: standard
   fp16: False
-  bf16: False
+  bf16: True
   context_length: 512
-  device: cpu
-  use_flash_attention: False
+  device: cuda
+  use_flash_attention: True
 
   # LOARA Parameters, if selected
   lora_r: 64
@@ -108,5 +108,6 @@ cache:
 
 
 rag:
+  enabled: False
   max_gen_context_length: 192
   chunk_size: 512
