@@ -28,10 +28,10 @@ We provide instructions for running the API with and without Docker. Follow eith
    pip install -r requirements.txt
    ```
 
-2. **Install CUDA (optional):**
+2. **Install CUDA (recommended):**
    If you want to use GPU acceleration, make sure you have CUDA installed. The version of flash attention that we use is only compatible with CUDA 12.2 and 11.8. You can instead build it from [source](https://github.com/Dao-AILab/flash-attention) if you want to use a different version of CUDA, but this takes a lot longer and is more work.
 
-3. **Install Flash Attention (optional):**
+3. **Install Flash Attention (recommended):**
    Installing flash attention will significantly improve performance and is highly recommended:
    ```bash
    MAX_JOBS=4 pip install flash-attn==2.5.8 --no-build-isolation
@@ -69,12 +69,18 @@ You can also use the provided `Dockerfile` to run the API:
 
 3. **Start the Docker container:**
    ```bash
-   docker run -p 8000:8000 -e OPENAI_API_KEY=$OPENAI_API_KEY -it --rm --name intract_api intract_api
+   docker run -p 8000:8000 -e OPENAI_API_KEY=$OPENAI_API_KEY -it --rm --name intract_api intract_api --config-name=cpu_config
    ```
 
    - Binds port `8000` on the host to port `8000` on the container.
    - Removes the container when it stops.
    - Uses the `deepseek-ai/deepseek-coder-1.3b-base` model by default.
+
+4. **Enable GPU Acceleration (recommended):**
+   To use GPU acceleration, add the `--gpus all` flag when starting the container, and remove the `--config-name cpu_config` flag to revert to the default, gpu-compatible config:
+   ```bash
+   docker run -p 8000:8000 -e OPENAI_API_KEY=$OPENAI_API_KEY --gpus all -it --rm --name intract_api intract_api
+   ```
 
 ### 🧪 **Testing the API**
 
@@ -88,17 +94,6 @@ Once the server is running (either with or without Docker), you can test the API
 3. You can now test any of the endpoints through the Swagger UI, such as:
    - `/generate` to get a code completion
    - `/finetune/project` to start a fine-tuning process
-
-
----
-
-## 🔥 **Enable GPU Acceleration**
-
-Unlock GPU acceleration by adding the `--gpus all` flag:
-
-```bash
-docker run -p 8000:8000 -e OPENAI_API_KEY=$OPENAI_API_KEY --gpus all -it --rm --name intract_api intract_api
-```
 
 ---
 

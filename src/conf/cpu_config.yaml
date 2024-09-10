@@ -1,0 +1,7 @@
+defaults:
+  - config
+
+model:
+  bf16: False
+  device: cpu
+  use_flash_attention: False
