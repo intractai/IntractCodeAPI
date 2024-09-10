@@ -1,7 +1,10 @@
-FROM nvidia/cuda:12.1.0-devel-ubuntu22.04
+FROM nvidia/cuda:12.2.0-devel-ubuntu22.04
 
-RUN apt update
+RUN apt update && apt-get upgrade -y
 RUN apt install python3.10 python3-pip python-is-python3 -y
+
+# Install git
+RUN apt install git -y
 
 # Set the working directory in the container
 WORKDIR /src
@@ -11,17 +14,18 @@ COPY requirements.txt .
 
 # Install required librarys
 RUN pip install -r requirements.txt
-RUN apt install git -y
 
 # Install flash attention
-RUN git clone --branch v2.3.6 --depth 1 https://github.com/Dao-AILab/flash-attention.git
-WORKDIR /src/flash-attention
-RUN MAX_JOBS=4 python setup.py install
+RUN MAX_JOBS=4 pip install flash-attn==2.5.8 --no-build-isolation
 
 WORKDIR /src
 COPY src/ .
 
 # Run the application
-# CMD ["ls"]
-CMD ["python",  "main.py", "server.host=0.0.0.0", "server.port=8000"]
+ENTRYPOINT ["python", "main.py", "server.host=0.0.0.0", "server.port=8000"]
+CMD []
 EXPOSE 8000
+
+# Example usage:
+# docker run -p 8000:8000 your-image-name model.device=cuda train.train_on_code=True
+# This allows passing additional arguments to the Python script when running the container
