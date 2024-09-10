@@ -18,28 +18,76 @@ An API designed for code completion and fine-tuning of open-source large languag
 
 ## 🚀 **Quick Start**
 
-Get started with just a few commands:
+We provide instructions for running the API with and without Docker. Follow either the [Without Docker](#-without-docker) or [With Docker](#-with-docker) section, and then follow the instructions in the [Testing the API](#-testing-the-api) section to get started.
+
+### 🖥️ **Without Docker** (Recommended)
+
+1. **Install dependencies:**
+   Ensure you have Python 3.9+ and pip installed. Then run:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+2. **Install CUDA (optional):**
+   If you want to use GPU acceleration, make sure you have CUDA installed. The version of flash attention that we use is only compatible with CUDA 12.2 and 11.8. You can instead build it from [source](https://github.com/Dao-AILab/flash-attention) if you want to use a different version of CUDA, but this takes a lot longer and is more work.
+
+3. **Install Flash Attention (optional):**
+   Installing flash attention will significantly improve performance and is highly recommended:
+   ```bash
+   MAX_JOBS=4 pip install flash-attn==2.5.8 --no-build-isolation
+   ```
+
+4. **Set OpenAI API Key (optional):**
+   If you want to use SFT with rejection sampling or RAG, you need to set the OPENAI_API_KEY environment variable:
+   ```bash
+   export OPENAI_API_KEY=your_api_key_here
+   ```
+
+5. **Start the API:**
+   Navigate to the `src` directory and run:
+   ```bash
+   python main.py
+   ```
+
+   - This starts the server on `localhost:8000`.
+   - Uses the `deepseek-ai/deepseek-coder-1.3b-base` model by default.
+
+### 🐳 **With Docker**
+
+You can also use the provided `Dockerfile` to run the API:
 
 1. **Build the Docker image:**
    ```bash
-   docker build -t docker_agent .
+   docker build -t intract_api .
    ```
 
-2. **Start the Docker container:**
+2. **Set OpenAI API Key (optional):**
+   If you want to use SFT with rejection sampling or RAG, you need to set the OPENAI_API_KEY environment variable:
    ```bash
-   docker run -p 8000:8000 -it --rm --name docker_agent docker_agent
+   export OPENAI_API_KEY=your_api_key_here
+   ```
+
+3. **Start the Docker container:**
+   ```bash
+   docker run -p 8000:8000 -e OPENAI_API_KEY=$OPENAI_API_KEY -it --rm --name intract_api intract_api
    ```
 
    - Binds port `8000` on the host to port `8000` on the container.
    - Removes the container when it stops.
    - Uses the `deepseek-ai/deepseek-coder-1.3b-base` model by default.
 
-3. **Access the API:**
-   Once the container is running, you can access the API documentation and test the endpoints by opening a web browser and navigating to:
-   ```
-   http://localhost:8000/docs
-   ```
-   This will open the Swagger UI, where you can explore and interact with the available API endpoints.
+### 🧪 **Testing the API**
+
+Once the server is running (either with or without Docker), you can test the API:
+
+1. Open a web browser and navigate to `http://localhost:8000/docs` to access the Swagger UI, where you can explore and interact with the available API endpoints.
+2. Complete the following steps to set up and authorize your session. This is required for using the other endpoints:
+   - Navigate to `localhost:8000/register` to create an account (data will only be stored locally).
+   - Return to the Swagger UI at `localhost:8000/docs`.
+   - Click the "Authorize" button on the top right of the Swagger UI to authorize your session.
+3. You can now test any of the endpoints through the Swagger UI, such as:
+   - `/generate` to get a code completion
+   - `/finetune/project` to start a fine-tuning process
 
 
 ---
@@ -49,7 +97,7 @@ Get started with just a few commands:
 Unlock GPU acceleration by adding the `--gpus all` flag:
 
 ```bash
-docker run -p 8000:8000 --gpus all -it --rm --name docker_agent docker_agent
+docker run -p 8000:8000 -e OPENAI_API_KEY=$OPENAI_API_KEY --gpus all -it --rm --name intract_api intract_api
 ```
 
 ---
@@ -61,8 +109,8 @@ The model's behavior and training parameters can be customized by modifying the 
 ### Model Configuration
 - `model_name`: Set the model to use (default: deepseek-ai/deepseek-coder-1.3b-base)
 - `context_length`: Set the context length for the model (default: 512)
-- `device`: Choose the device to run the model on (default: cpu)
-- `use_flash_attention`: Enable or disable flash attention (default: False)
+- `device`: Choose the device to run the model on (default: cuda)
+- `use_flash_attention`: Enable or disable flash attention (default: True)
 
 ### Fine-tuning Method Selection
 You can switch between different fine-tuning methods by adjusting the following parameters:
