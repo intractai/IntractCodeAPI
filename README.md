@@ -51,6 +51,7 @@ We provide instructions for running the API with and without Docker. Follow eith
 
    - This starts the server on `localhost:8000`.
    - Uses the `deepseek-ai/deepseek-coder-1.3b-base` model by default.
+   - Add a `--config-name=cpu_config` flag to run on CPU instead of GPU (extremely slow).
 
 ### 🐳 **With Docker**
 
