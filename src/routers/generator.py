@@ -174,7 +174,7 @@ def batch_generate_completions(
     # but it would require a fair bit of refactoring
     all_inputs = []
     for item in items:
-        inputs = format_input(item, 'cpu', tokenizer, config)
+        inputs = prepare_input(item, config, 'cpu', tokenizer)
         all_inputs.append(inputs)
 
     # In case we have fewer examples than batch_size

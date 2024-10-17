@@ -26,6 +26,8 @@ eval:
   top_k_retrievals: 5 # Number of different potential retrievals to test
                       # Will log the difference between the first and the best retrieval results
 
+inference:
+  max_gen_length: 256
 
 train:
   max_gen_length: 512 # Maximum length of generated code

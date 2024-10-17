@@ -198,6 +198,10 @@ class StandardModelLoader(ModelLoader):
         tokenizer = AutoTokenizer.from_pretrained(model_dir)
         tokenizer.model_max_length = self._config.context_length
         tokenizer.truncation_side = 'left'
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        if tokenizer.pad_token_id is None:
+            tokenizer.pad_token_id = tokenizer.convert_tokens_to_ids(tokenizer.pad_token)
 
         model = AutoModelForCausalLM.from_pretrained(
             model_dir, attn_implementation=attn_implementation,
