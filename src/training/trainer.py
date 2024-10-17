@@ -24,14 +24,10 @@ from transformers.trainer_utils import (
     EvalPrediction,
     EvalLoopOutput,
     has_length,
-    is_torch_tpu_available,
 )
 from transformers.training_args import TrainingArguments
 from transformers.utils import is_accelerate_available, logging
 
-
-if is_torch_tpu_available(check_device=False):
-    import torch_xla.core.xla_model as xm
 
 if is_accelerate_available():
     from accelerate import __version__ as accelerate_version
@@ -177,9 +173,6 @@ class ContinualTrainer(Trainer):
                 self.model, "main_input_name", "input_ids")
             inputs_decode = self._prepare_input(
                 inputs[main_input_name]) if args.include_inputs_for_metrics else None
-
-            if is_torch_tpu_available():
-                xm.mark_step()
 
             # Update containers on host
             if loss is not None:
